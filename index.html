@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>South West Coast Path — Walk Journal</title>
+<title>South West Coast Path — Walk Journal v6</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -552,6 +552,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
           <button class="btn btn-secondary" onclick="closeDriveModal()">Cancel</button>
           <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectDrive()" style="display:none">Sign Out & Disconnect</button>
         </div>
+        <!-- Data integrity tools -->
+        <div style="margin-top:20px;padding-top:16px;border-top:var(--rule-faint)">
+          <div style="font-family:var(--font-ui);font-size:.63rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);margin-bottom:10px">Data Integrity &amp; Recovery</div>
+          <div style="font-family:var(--font-ui);font-size:.65rem;color:var(--slate-light);line-height:1.5;margin-bottom:12px">Each walk's data is also saved as an individual JSON file within its Drive subfolder, allowing reconstruction of the master record from distributed backups.</div>
+          <div class="form-actions" style="flex-wrap:wrap">
+            <button class="btn btn-secondary" onclick="restoreFromDriveMirror();closeDriveModal()" title="Rebuild master data by reading individual walk JSON files from each Drive subfolder">🔄 Restore from Subfolders</button>
+            <button class="btn btn-secondary" onclick="downloadLocalMirror()" title="Download a clean JSON snapshot of all walk data (no embedded images) to your local disk">⬇ Download JSON Backup</button>
+            <label class="btn btn-secondary" style="cursor:pointer" title="Import a previously downloaded JSON backup file">
+              ⬆ Import JSON Backup
+              <input type="file" accept=".json,application/json" style="display:none" onchange="importLocalMirror(this)">
+            </label>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -606,7 +619,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 // =====================================================
 let walks=[], currentPhotos=[], currentPeople=[], currentTags=[];
 let editingId=null, driveConfig=null, isSyncing=false;
-let currentGpx=null; // {points:[{lat,lon,ele}], dataUrl(png), driveFileId, name}
+let currentGpx=null; // {points:[{lat,lon,ele}], dataUrl(png), driveFileId, name, rawText}
 let leafletMap=null;
 
 // OAuth state
@@ -629,7 +642,14 @@ function loadLocal(){
     else{localStorage.removeItem('swcp_token');}
   }catch(e){}
 }
-function saveLocal(){localStorage.setItem('swcp_walks',JSON.stringify(walks))}
+function saveLocal(){
+  // Strip any residual base64 dataUrls before persisting — these must never live in localStorage
+  const clean=walks.map(w=>({
+    ...w,
+    photos:(w.photos||[]).map(p=>{const {dataUrl,...rest}=p;return rest;})
+  }));
+  localStorage.setItem('swcp_walks',JSON.stringify(clean));
+}
 function saveDriveConfig(){localStorage.setItem('swcp_drive',JSON.stringify(driveConfig))}
 function saveToken(token,expiresIn){
   oauthToken=token;
@@ -850,6 +870,93 @@ async function syncFromDrive(){
   try{const listing=await driveListFolder(driveConfig.folderId);const df=(listing.files||[]).find(f=>f.name==='swcp-walks.json');if(df){const c=await driveReadFileText(df.id);const l=JSON.parse(c);if(Array.isArray(l)){walks=l;saveLocal();updateStats();renderHistory();renderHome();showToast(walks.length+' walks loaded','success');}}setDriveBadge('connected','Drive connected');}
   catch(e){showToast('Refresh failed: '+e.message,'error');setDriveBadge('connected','Drive — error');}
 }
+// Write a per-walk JSON sidecar into the walk's own subfolder
+async function writePerWalkJson(walk,subFolderId){
+  if(!subFolderId)return;
+  const fname=walkFolderName(walk.walkNumber,walk.title)+'-data.json';
+  // Produce a clean copy with no embedded base64
+  const clean={...walk,photos:(walk.photos||[]).map(p=>{const{dataUrl,...r}=p;return r;})};
+  try{
+    // Check if a sidecar already exists in this folder
+    const listing=await driveListFolder(subFolderId);
+    const existing=(listing.files||[]).find(f=>f.name===fname);
+    await driveWriteJSON(subFolderId,existing?existing.id:null,fname,JSON.stringify(clean,null,2));
+  }catch(e){console.warn('Per-walk JSON write failed',e);}
+}
+
+// Reconstruct the master walks array from per-walk JSON files in Drive subfolders
+async function restoreFromDriveMirror(){
+  if(!driveConfig||!oauthToken){showToast('Connect to Drive first','error');return;}
+  if(!confirm('Restore all walk data from Drive subfolders?\n\nThis will replace your current local data with data reconstructed from the individual walk JSON files stored in each Drive subfolder. Continue?'))return;
+  setDriveBadge('syncing','Restoring…');showToast('Scanning Drive subfolders…');
+  try{
+    const listing=await driveListFolder(driveConfig.folderId);
+    const subfolders=(listing.files||[]).filter(f=>f.mimeType==='application/vnd.google-apps.folder');
+    const restored=[];
+    for(const folder of subfolders){
+      try{
+        const contents=await driveListFolder(folder.id);
+        const sidecar=(contents.files||[]).find(f=>f.name.endsWith('-data.json'));
+        if(sidecar){
+          const text=await driveReadFileText(sidecar.id);
+          const walkData=JSON.parse(text);
+          if(walkData&&walkData.id)restored.push(walkData);
+        }
+      }catch(e){console.warn('Failed to read subfolder '+folder.name,e);}
+    }
+    if(!restored.length){showToast('No per-walk JSON files found in Drive subfolders','error');setDriveBadge('connected','Drive connected');return;}
+    // Sort by date ascending before merging
+    restored.sort((a,b)=>a.date.localeCompare(b.date));
+    // Merge with any existing walks not found in Drive (keep local-only walks)
+    const restoredIds=new Set(restored.map(w=>w.id));
+    const localOnly=walks.filter(w=>!restoredIds.has(w.id));
+    walks=[...restored,...localOnly].sort((a,b)=>a.date.localeCompare(b.date));
+    saveLocal();
+    // Also rewrite the master JSON
+    if(driveConfig.dataFileId||driveConfig.folderId){
+      await driveWriteJSON(driveConfig.folderId,driveConfig.dataFileId,'swcp-walks.json',JSON.stringify(walks,null,2));
+    }
+    updateStats();renderHome();renderHistory();
+    setDriveBadge('connected','Drive connected');
+    showToast(`Restored ${restored.length} walk(s) from Drive subfolders`,'success');
+  }catch(e){setDriveBadge('connected','Drive — error');showToast('Restore failed: '+e.message,'error');}
+}
+
+// Download a clean JSON backup of the current walk data to the local filesystem
+function downloadLocalMirror(){
+  const clean=walks.map(w=>({
+    ...w,
+    photos:(w.photos||[]).map(p=>{const{dataUrl,...r}=p;return r;})
+  }));
+  const blob=new Blob([JSON.stringify(clean,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const dateStr=new Date().toISOString().split('T')[0];
+  a.download=`swcp-walks-backup-${dateStr}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Walk data downloaded as JSON backup','success');
+}
+
+// Import a previously downloaded JSON mirror file
+async function importLocalMirror(input){
+  if(!input.files[0])return;
+  const text=await input.files[0].text();
+  try{
+    const data=JSON.parse(text);
+    if(!Array.isArray(data))throw new Error('Invalid format — expected a JSON array');
+    if(!confirm(`Import ${data.length} walk(s) from backup file?\n\nExisting walks with matching IDs will be updated; new walks will be added.`))return;
+    const importedIds=new Set(data.map(w=>w.id));
+    walks=[...data,...walks.filter(w=>!importedIds.has(w.id))].sort((a,b)=>a.date.localeCompare(b.date));
+    saveLocal();
+    if(driveConfig)try{await syncToDrive();}catch(e){}
+    updateStats();renderHome();renderHistory();
+    showToast(`Imported ${data.length} walk(s) from backup`,'success');
+  }catch(e){showToast('Import failed: '+e.message,'error');}
+  input.value='';
+}
+
 function disconnectDrive(){
   if(!confirm('Sign out and disconnect Drive? Your locally saved walks will be kept.'))return;
   const tok=oauthToken;
@@ -954,7 +1061,7 @@ async function loadGpxFile(file){
   const text=await file.text();
   const pts=parseGpx(text);
   if(!pts.length){showGpxStatus('No track points found in GPX file','err');return;}
-  currentGpx={points:pts,name:file.name,dataUrl:null,driveFileId:null};
+  currentGpx={points:pts,name:file.name,dataUrl:null,driveFileId:null,rawText:text};
   // Show stats
   const stats=gpxStats(pts);
   document.getElementById('gpxMeta').innerHTML=
@@ -1098,6 +1205,28 @@ async function uploadGpxMap(walkNum,walkTitle,subFolderId){
   return null;
 }
 
+async function uploadGpxRaw(walkNum,walkTitle,subFolderId){
+  if(!currentGpx||!currentGpx.rawText||!subFolderId)return null;
+  const fname=walkFolderName(walkNum,walkTitle)+'.gpx';
+  try{
+    const blob=new Blob([currentGpx.rawText],{type:'application/gpx+xml'});
+    const meta=JSON.stringify({name:fname,parents:[subFolderId]});
+    const form=new FormData();
+    form.append('metadata',new Blob([meta],{type:'application/json'}));
+    form.append('file',blob);
+    const r=await driveRequest(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {method:'POST',body:form}
+    );
+    const d=await r.json();
+    if(d.id){
+      currentGpx.driveRawFileId=d.id;
+      return{fileId:d.id,viewUrl:`https://drive.google.com/file/d/${d.id}/view`,filename:fname};
+    }
+  }catch(e){console.warn('GPX raw upload failed',e);}
+  return null;
+}
+
 // =====================================================
 //  NAVIGATION
 // =====================================================
@@ -1113,11 +1242,7 @@ function showView(id,navEl){
   document.getElementById('sidebar').classList.remove('open');
 }
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open')}
-function openDriveModal(){document.getElementById('driveModal').classList.add('open');if(driveConfig){document.getElementById('folderIdInput').value=driveConfig.folderId||'';document.getElementById('disconnectBtn').style.display='inline-flex';showDriveStatus('Currently connected.');}else{document.getElementById('disconnectBtn').style.display='none';showDriveStatus('');}}
-function closeDriveModal(){document.getElementById('driveModal').classList.remove('open')}
 function closeModalOnBackdrop(e,id){if(e.target===document.getElementById(id))document.getElementById(id).classList.remove('open')}
-function setDriveBadge(state,text){const b=document.getElementById('driveStatusBadge');b.className='drive-status '+state;document.getElementById('driveStatusText').textContent=text;const w=document.getElementById('driveWarning');if(w)w.style.display=(state==='disconnected'?'block':'none')}
-function showDriveStatus(msg){document.getElementById('driveConnectStatus').textContent=msg}
 
 // =====================================================
 //  FORM HELPERS
@@ -1209,14 +1334,25 @@ async function saveWalk(e){
 
   // Upload GPX map image to Drive
   let gpxRecord=null;
+  let walkSubFolderId=null; // resolved once, reused below
   if(driveConfig&&currentGpx&&currentGpx.dataUrl&&!currentGpx.driveFileId){
     btn.textContent='Uploading route map…';
     try{
-      const subId=await ensureWalkSubfolder(walkNumber,title);
-      if(subId){const mapRef=await uploadGpxMap(walkNumber,title,subId);if(mapRef)gpxRecord=mapRef;}
+      walkSubFolderId=await ensureWalkSubfolder(walkNumber,title);
+      if(walkSubFolderId){
+        const mapRef=await uploadGpxMap(walkNumber,title,walkSubFolderId);
+        if(mapRef)gpxRecord=mapRef;
+        // Also upload the raw GPX file for route reconstruction
+        if(currentGpx.rawText&&!currentGpx.driveRawFileId){
+          btn.textContent='Uploading GPX file…';
+          const rawRef=await uploadGpxRaw(walkNumber,title,walkSubFolderId);
+          if(rawRef&&gpxRecord)gpxRecord.rawFileId=rawRef.fileId;
+          else if(rawRef)gpxRecord={...rawRef};
+        }
+      }
     }catch(e){console.warn('GPX upload failed',e);}
   }else if(currentGpx&&currentGpx.driveFileId){
-    gpxRecord={fileId:currentGpx.driveFileId,viewUrl:currentGpx.driveViewUrl};
+    gpxRecord={fileId:currentGpx.driveFileId,viewUrl:currentGpx.driveViewUrl,rawFileId:currentGpx.driveRawFileId||null};
   }
 
   const savedPhotos=currentPhotos.map(p=>({id:p.id,name:p.name,w:p.w||null,h:p.h||null,driveFileId:p.driveFileId||null,driveViewUrl:p.driveViewUrl||null,status:p.status}));
@@ -1243,6 +1379,14 @@ async function saveWalk(e){
   if(editingId){const idx=walks.findIndex(w=>w.id===editingId);if(idx>-1)walks[idx]=walk;else walks.push(walk);editingId=null;}
   else walks.push(walk);
   saveLocal();updateStats();
+
+  // Write per-walk JSON sidecar to Drive subfolder
+  if(driveConfig){
+    try{
+      const subId=walkSubFolderId||await ensureWalkSubfolder(walk.walkNumber,walk.title);
+      if(subId)await writePerWalkJson(walk,subId);
+    }catch(e){console.warn('Per-walk JSON sidecar failed',e);}
+  }
 
   if(driveConfig){btn.textContent='Syncing…';try{await syncToDrive();showToast('Walk saved & backed up to Drive','success');}catch(e){showToast('Walk saved locally — Drive sync failed','error');}}
   else showToast('Walk saved locally');
@@ -1339,6 +1483,7 @@ function renderHistory(){
     const drivePhotos=(w.photos||[]).filter(p=>p.driveFileId);
     const photoLinks=drivePhotos.map(p=>`<a class="drive-photo-chip" href="${p.driveViewUrl||'#'}" target="_blank">📷 ${esc(p.name||'Photo')}</a>`).join('');
     const gpxLink=w.gpxMap?`<a class="drive-photo-chip" href="${w.gpxMap.viewUrl||'#'}" target="_blank">🗺 Route Map</a>`:'';
+    const gpxRawLink=(w.gpxMap&&w.gpxMap.rawFileId)?`<a class="drive-photo-chip" href="https://drive.google.com/file/d/${w.gpxMap.rawFileId}/view" target="_blank">📡 GPX File</a>`:'';
     const metaItems=[
       ['Date',d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})],
       w.startTime?['Time',w.startTime+(w.finishTime?' – '+w.finishTime:'')]:null,
@@ -1359,7 +1504,7 @@ function renderHistory(){
       ${w.reflections?`<div class="reflections-display">${esc(w.reflections).replace(/\n/g,'<br>')}</div>`:''}
       ${w.tips?`<div style="margin:11px 0;padding:12px 16px;background:var(--sand-light);border-radius:var(--radius);border:var(--rule-faint)"><div class="meta-key" style="margin-bottom:5px">Tips for future walkers</div><div style="font-size:.88rem;color:var(--slate)">${esc(w.tips).replace(/\n/g,'<br>')}</div></div>`:''}
       ${tags?`<div class="walk-tags" style="margin:7px 0">${tags}</div>`:''}
-      ${(photoLinks||gpxLink)?`<div class="drive-photos-row">${gpxLink}${photoLinks}</div>`:''}
+      ${(photoLinks||gpxLink||gpxRawLink)?`<div class="drive-photos-row">${gpxLink}${gpxRawLink}${photoLinks}</div>`:''}
       ${w.photosLink?`<div style="margin-top:8px"><a style="font-family:var(--font-ui);font-size:.68rem;color:var(--blue);text-decoration:none;border:1px solid var(--blue-light);padding:4px 10px;border-radius:var(--radius)" href="${esc(w.photosLink)}" target="_blank">📱 Google Photos Album</a></div>`:''}
       <div class="card-actions"><button class="btn btn-secondary" onclick="editWalk('${w.id}')">✏ Edit</button><button class="btn btn-danger" onclick="deleteWalk('${w.id}')">✕ Delete</button>${driveConfig?`<a class="btn btn-secondary" href="https://drive.google.com/drive/folders/${driveConfig.folderId}" target="_blank">📁 Drive</a>`:''}</div>
     </div></div>`;
