@@ -263,6 +263,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
     <span class="compass">⊕</span>
     <h1>South West Coast Path</h1>
     <div class="subtitle">Walk Journal</div>
+    <div style="font-family:var(--font-ui);font-size:.52rem;letter-spacing:.1em;color:rgba(232,223,200,.35);margin-top:3px">v6.0</div>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-item active" data-view="home"     onclick="showView('home',this)"><span class="nav-icon">⌂</span> Dashboard</div>
@@ -810,14 +811,17 @@ async function driveGetImageDataUrl(fileId){
 // =====================================================
 function openDriveModal(){
   document.getElementById('driveModal').classList.add('open');
-  if(oauthToken){
+  // Show signed-in panel if we have a live token OR if drive is already configured
+  // (so recovery buttons are always reachable even after token expiry)
+  if(oauthToken||driveConfig){
     document.getElementById('driveSignedOut').style.display='none';
     document.getElementById('driveSignedIn').style.display='block';
     if(driveConfig){
       document.getElementById('folderIdInputSignedIn').value=driveConfig.folderId||'';
       document.getElementById('disconnectBtn').style.display='inline-flex';
     }
-    onSignedIn();
+    if(oauthToken)onSignedIn();
+    else showDriveStatus('Session expired — sign in again to sync',2);
   } else {
     document.getElementById('driveSignedOut').style.display='block';
     document.getElementById('driveSignedIn').style.display='none';
@@ -982,12 +986,14 @@ async function ensureWalkSubfolder(walkNum,walkTitle){
   return created.folderId||null;
 }
 
-async function uploadPhotosToDrive(walkNum,walkTitle){
+async function uploadPhotosToDrive(walkNum,walkTitle,preResolvedSubFolderId){
   if(!driveConfig)return;
   const local=currentPhotos.filter(p=>p.status==='local'&&p.dataUrl);
   if(!local.length)return;
-  let subFolderId=null;
-  try{subFolderId=await ensureWalkSubfolder(walkNum,walkTitle);}catch(e){console.warn('subfolder failed',e);return;}
+  let subFolderId=preResolvedSubFolderId||null;
+  if(!subFolderId){
+    try{subFolderId=await ensureWalkSubfolder(walkNum,walkTitle);}catch(e){console.warn('subfolder failed',e);return;}
+  }
   if(!subFolderId)return;
   const folderName=walkFolderName(walkNum,walkTitle);
   for(let i=0;i<local.length;i++){
@@ -1326,32 +1332,52 @@ async function saveWalk(e){
   const walkNumber=editingId?walks.findIndex(w=>w.id===editingId)+1:walks.length+1;
   const title=document.getElementById('fTitle').value;
 
-  // Upload photos to Drive
-  if(driveConfig&&currentPhotos.some(p=>p.status==='local'&&p.dataUrl)){
-    btn.textContent='Uploading photos…';
-    await uploadPhotosToDrive(walkNumber,title);
+  // ── Drive uploads ─────────────────────────────────────
+  // Resolve subfolder once; reused for photos, GPX, sidecar
+  let walkSubFolderId=null;
+  if(driveConfig){
+    try{ walkSubFolderId=await ensureWalkSubfolder(walkNumber,title); }
+    catch(e){ console.warn('Subfolder creation failed',e); }
   }
 
-  // Upload GPX map image to Drive
+  // Upload photos
+  if(driveConfig&&walkSubFolderId&&currentPhotos.some(p=>p.status==='local'&&p.dataUrl)){
+    btn.textContent='Uploading photos…';
+    await uploadPhotosToDrive(walkNumber,title,walkSubFolderId);
+  }
+
+  // Upload GPX artefacts (PNG map and/or raw GPX file), independent of each other
   let gpxRecord=null;
-  let walkSubFolderId=null; // resolved once, reused below
-  if(driveConfig&&currentGpx&&currentGpx.dataUrl&&!currentGpx.driveFileId){
-    btn.textContent='Uploading route map…';
-    try{
-      walkSubFolderId=await ensureWalkSubfolder(walkNumber,title);
-      if(walkSubFolderId){
+  if(driveConfig&&walkSubFolderId&&currentGpx){
+    // Raw GPX file — upload regardless of whether PNG is ready
+    if(currentGpx.rawText&&!currentGpx.driveRawFileId){
+      btn.textContent='Uploading GPX file…';
+      try{
+        const rawRef=await uploadGpxRaw(walkNumber,title,walkSubFolderId);
+        if(rawRef)gpxRecord={rawFileId:rawRef.fileId,rawViewUrl:rawRef.viewUrl};
+      }catch(e){ console.warn('Raw GPX upload failed',e); }
+    }
+    // PNG map snapshot — only if canvas capture has completed
+    if(currentGpx.dataUrl&&!currentGpx.driveFileId){
+      btn.textContent='Uploading route map…';
+      try{
         const mapRef=await uploadGpxMap(walkNumber,title,walkSubFolderId);
-        if(mapRef)gpxRecord=mapRef;
-        // Also upload the raw GPX file for route reconstruction
-        if(currentGpx.rawText&&!currentGpx.driveRawFileId){
-          btn.textContent='Uploading GPX file…';
-          const rawRef=await uploadGpxRaw(walkNumber,title,walkSubFolderId);
-          if(rawRef&&gpxRecord)gpxRecord.rawFileId=rawRef.fileId;
-          else if(rawRef)gpxRecord={...rawRef};
+        if(mapRef){
+          gpxRecord=gpxRecord?{...gpxRecord,...mapRef}:{...mapRef};
         }
-      }
-    }catch(e){console.warn('GPX upload failed',e);}
-  }else if(currentGpx&&currentGpx.driveFileId){
+      }catch(e){ console.warn('GPX map upload failed',e); }
+    }
+    // Carry over existing Drive IDs (editing an already-saved walk)
+    if(currentGpx.driveFileId){
+      gpxRecord=gpxRecord||{};
+      gpxRecord.fileId=gpxRecord.fileId||currentGpx.driveFileId;
+      gpxRecord.viewUrl=gpxRecord.viewUrl||currentGpx.driveViewUrl;
+    }
+    if(currentGpx.driveRawFileId){
+      gpxRecord=gpxRecord||{};
+      gpxRecord.rawFileId=gpxRecord.rawFileId||currentGpx.driveRawFileId;
+    }
+  } else if(!driveConfig&&currentGpx&&currentGpx.driveFileId){
     gpxRecord={fileId:currentGpx.driveFileId,viewUrl:currentGpx.driveViewUrl,rawFileId:currentGpx.driveRawFileId||null};
   }
 
@@ -1381,11 +1407,10 @@ async function saveWalk(e){
   saveLocal();updateStats();
 
   // Write per-walk JSON sidecar to Drive subfolder
-  if(driveConfig){
-    try{
-      const subId=walkSubFolderId||await ensureWalkSubfolder(walk.walkNumber,walk.title);
-      if(subId)await writePerWalkJson(walk,subId);
-    }catch(e){console.warn('Per-walk JSON sidecar failed',e);}
+  if(driveConfig&&walkSubFolderId){
+    btn.textContent='Writing walk record…';
+    try{ await writePerWalkJson(walk,walkSubFolderId); }
+    catch(e){ console.warn('Per-walk JSON sidecar failed',e); }
   }
 
   if(driveConfig){btn.textContent='Syncing…';try{await syncToDrive();showToast('Walk saved & backed up to Drive','success');}catch(e){showToast('Walk saved locally — Drive sync failed','error');}}
