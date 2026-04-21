@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 /* ── DESIGN TOKENS ── */
 :root {
@@ -513,18 +514,46 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 <!-- DRIVE MODAL -->
 <div class="modal-overlay" id="driveModal" onclick="closeModalOnBackdrop(event,'driveModal')">
   <div class="modal-card">
-    <div class="modal-header"><h3>Google Drive — Cloud Backup & Sharing</h3><button class="modal-close" onclick="closeDriveModal()">✕</button></div>
+    <div class="modal-header"><h3>Google Drive — Cloud Backup</h3><button class="modal-close" onclick="closeDriveModal()">✕</button></div>
     <div class="modal-body">
-      <p style="font-size:.88rem;color:var(--slate);margin-bottom:18px;line-height:1.6">Walk data and photos are stored in Google Drive. Each walk gets its own photo subfolder. Share the root folder with co-contributors.</p>
-      <div class="setup-step"><div class="step-num">1</div><div class="step-text"><h4>Create a folder in Google Drive</h4><p>Go to <a href="https://drive.google.com" target="_blank" style="color:var(--blue)">drive.google.com</a>, create "SWCP Walk Journal" and share it with contributors.</p></div></div>
-      <div class="setup-step"><div class="step-num">2</div><div class="step-text"><h4>Copy the Folder ID from the URL</h4><p>Open the folder. URL: <code style="background:var(--sand);padding:1px 5px;border-radius:3px;font-size:.78rem">drive.google.com/drive/folders/<strong>FOLDER_ID</strong></code></p><input type="text" class="folder-id-input" id="folderIdInput" placeholder="Paste folder ID here…"></div></div>
-      <div class="setup-step"><div class="step-num">3</div><div class="step-text"><h4>Subfolders for photos & maps</h4><p>Each walk creates a subfolder e.g. <code style="background:var(--sand);padding:1px 4px;border-radius:3px;font-size:.78rem">01-Minehead-to-Porlock-Weir</code>. GPX map images are stored there too.</p></div></div>
-      <div id="driveConnectStatus" style="font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light);min-height:18px;margin-bottom:11px"></div>
-      <div class="form-actions">
-        <button class="btn btn-primary" onclick="connectDrive()">Connect Drive</button>
-        <button class="btn btn-secondary" onclick="closeDriveModal()">Cancel</button>
-        <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectDrive()" style="display:none">Disconnect</button>
+
+      <!-- SIGNED OUT STATE -->
+      <div id="driveSignedOut">
+        <p style="font-size:.88rem;color:var(--slate);margin-bottom:18px;line-height:1.6">Your walk data and photos are backed up to your own Google Drive. Nothing is shared with anyone else.</p>
+        <div class="setup-step"><div class="step-num">1</div><div class="step-text"><h4>Sign in with Google</h4><p>Click below to sign in. You'll be asked to allow access to Google Drive — this is needed to save your walk data and photos.</p></div></div>
+        <div class="setup-step"><div class="step-num">2</div><div class="step-text"><h4>Create a folder in Google Drive</h4><p>Go to <a href="https://drive.google.com" target="_blank" style="color:var(--blue)">drive.google.com</a> and create a folder called <strong>SWCP Walk Journal</strong> (or any name you prefer).</p></div></div>
+        <div class="setup-step"><div class="step-num">3</div><div class="step-text"><h4>Paste the Folder ID</h4><p>Open the folder. Copy the ID from the URL:<br><code style="background:var(--sand);padding:1px 5px;border-radius:3px;font-size:.78rem">drive.google.com/drive/folders/<strong>THIS_PART</strong></code></p>
+          <input type="text" class="folder-id-input" id="folderIdInput" placeholder="Paste folder ID here…">
+        </div></div>
+        <div id="driveConnectStatus" style="font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light);min-height:18px;margin:11px 0"></div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="signInBtn" onclick="driveSignIn()">Sign in with Google</button>
+          <button class="btn btn-secondary" onclick="closeDriveModal()">Cancel</button>
+        </div>
       </div>
+
+      <!-- SIGNED IN STATE -->
+      <div id="driveSignedIn" style="display:none">
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 15px;background:rgba(45,106,79,.08);border:1px solid rgba(45,106,79,.2);border-radius:var(--radius);margin-bottom:18px">
+          <img id="driveUserAvatar" src="" style="width:36px;height:36px;border-radius:50%;display:none">
+          <div>
+            <div id="driveUserName" style="font-family:var(--font-ui);font-size:.75rem;font-weight:600;color:var(--charcoal)"></div>
+            <div id="driveUserEmail" style="font-family:var(--font-ui);font-size:.65rem;color:var(--slate-light)"></div>
+          </div>
+          <span style="margin-left:auto;font-size:.75rem;color:var(--green)">✓ Signed in</span>
+        </div>
+        <div class="setup-step"><div class="step-num">1</div><div class="step-text"><h4>Your Drive folder ID</h4>
+          <p>Open your SWCP folder in <a href="https://drive.google.com" target="_blank" style="color:var(--blue)">Google Drive</a> and paste the folder ID from the URL.</p>
+          <input type="text" class="folder-id-input" id="folderIdInputSignedIn" placeholder="Paste folder ID here…">
+        </div></div>
+        <div id="driveConnectStatus2" style="font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light);min-height:18px;margin:11px 0"></div>
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="connectDrive()">Connect Folder</button>
+          <button class="btn btn-secondary" onclick="closeDriveModal()">Cancel</button>
+          <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectDrive()" style="display:none">Sign Out & Disconnect</button>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -580,99 +609,259 @@ let editingId=null, driveConfig=null, isSyncing=false;
 let currentGpx=null; // {points:[{lat,lon,ele}], dataUrl(png), driveFileId, name}
 let leafletMap=null;
 
+// OAuth state
+const GOOGLE_CLIENT_ID='794197374094-mmkrj97vhfqg6dgpmrk7epvmkdpjkrs7.apps.googleusercontent.com';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+let oauthToken=null;      // current access token string
+let tokenClient=null;     // Google Identity tokenClient
+let gisReady=false;       // GIS library loaded
+
 // =====================================================
 //  PERSISTENCE
 // =====================================================
-function loadLocal(){try{walks=JSON.parse(localStorage.getItem('swcp_walks')||'[]')}catch(e){walks=[]}try{driveConfig=JSON.parse(localStorage.getItem('swcp_drive')||'null')}catch(e){driveConfig=null}}
+function loadLocal(){
+  try{walks=JSON.parse(localStorage.getItem('swcp_walks')||'[]')}catch(e){walks=[]}
+  try{driveConfig=JSON.parse(localStorage.getItem('swcp_drive')||'null')}catch(e){driveConfig=null}
+  // Restore token if still valid (expiry stored alongside)
+  try{
+    const t=JSON.parse(localStorage.getItem('swcp_token')||'null');
+    if(t&&t.token&&t.expiry&&Date.now()<t.expiry-60000){oauthToken=t.token;}
+    else{localStorage.removeItem('swcp_token');}
+  }catch(e){}
+}
 function saveLocal(){localStorage.setItem('swcp_walks',JSON.stringify(walks))}
 function saveDriveConfig(){localStorage.setItem('swcp_drive',JSON.stringify(driveConfig))}
+function saveToken(token,expiresIn){
+  oauthToken=token;
+  localStorage.setItem('swcp_token',JSON.stringify({token,expiry:Date.now()+expiresIn*1000}));
+}
 
 // =====================================================
-//  DRIVE MCP HELPERS
+//  GOOGLE IDENTITY SERVICES — OAUTH
 // =====================================================
-async function driveCall(system,user,maxTokens=4000){
-  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:maxTokens,system,messages:[{role:'user',content:user}],mcp_servers:[{type:'url',url:'https://drivemcp.googleapis.com/mcp/v1',name:'gdrive'}]})});
-  if(!r.ok) throw new Error('API '+r.status);
+function initGIS(){
+  if(typeof google==='undefined'||!google.accounts){
+    // Library not yet loaded — retry shortly
+    setTimeout(initGIS,300);return;
+  }
+  gisReady=true;
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GOOGLE_CLIENT_ID,
+    scope:DRIVE_SCOPE,
+    callback:(response)=>{
+      if(response.error){
+        showDriveStatus('Sign-in failed: '+response.error);
+        setDriveBadge('disconnected','Google Drive — not connected');
+        return;
+      }
+      saveToken(response.access_token,response.expires_in||3600);
+      onSignedIn();
+    }
+  });
+  // If we already have a stored token, update UI immediately
+  if(oauthToken)onSignedIn();
+}
+
+function driveSignIn(){
+  if(!gisReady){showDriveStatus('Google sign-in loading, please try again…');return;}
+  tokenClient.requestAccessToken({prompt:'consent'});
+}
+
+function onSignedIn(){
+  // Fetch user profile to show name/email in modal
+  fetch('https://www.googleapis.com/oauth2/v3/userinfo',{
+    headers:{Authorization:'Bearer '+oauthToken}
+  }).then(r=>r.json()).then(profile=>{
+    document.getElementById('driveUserName').textContent=profile.name||'';
+    document.getElementById('driveUserEmail').textContent=profile.email||'';
+    const av=document.getElementById('driveUserAvatar');
+    if(profile.picture){av.src=profile.picture;av.style.display='block';}
+    document.getElementById('driveSignedOut').style.display='none';
+    document.getElementById('driveSignedIn').style.display='block';
+    if(driveConfig){
+      document.getElementById('folderIdInputSignedIn').value=driveConfig.folderId||'';
+      document.getElementById('disconnectBtn').style.display='inline-flex';
+      setDriveBadge('connected','Drive connected');
+    }
+  }).catch(()=>{
+    // Profile fetch failed but token may still be valid — show signed-in state anyway
+    document.getElementById('driveSignedOut').style.display='none';
+    document.getElementById('driveSignedIn').style.display='block';
+  });
+}
+
+// =====================================================
+//  GOOGLE DRIVE REST API HELPERS
+// =====================================================
+async function driveRequest(url,options={}){
+  if(!oauthToken)throw new Error('Not signed in to Google');
+  const headers={'Authorization':'Bearer '+oauthToken,...(options.headers||{})};
+  const r=await fetch(url,{...options,headers});
+  if(r.status===401){
+    // Token expired — clear and prompt re-auth
+    oauthToken=null;localStorage.removeItem('swcp_token');
+    setDriveBadge('disconnected','Session expired — reconnect Drive');
+    throw new Error('Google session expired. Please reconnect Drive.');
+  }
+  if(!r.ok){const e=await r.text();throw new Error('Drive API error '+r.status+': '+e);}
+  return r;
+}
+
+async function driveListFolder(folderId){
+  const url=`https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&pageSize=200`;
+  const r=await driveRequest(url);
   const d=await r.json();
-  const text=d.content.filter(b=>b.type==='text').map(b=>b.text).join('').trim();
-  const results=d.content.filter(b=>b.type==='mcp_tool_result');
-  return{text,results};
+  return{files:d.files||[]};
 }
-function parseJ(text,results=[]){
-  const t=s=>{try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){return null}};
-  let r=t(text);if(r)return r;
-  for(const res of results){r=t(res.content?.[0]?.text||'');if(r)return r;}
-  return null;
+
+async function driveReadFileText(fileId){
+  const r=await driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  return r.text();
 }
-async function driveListFolder(id){const{text,results}=await driveCall('List files in a Drive folder. Respond ONLY with JSON {"files":[{"id":"...","name":"...","mimeType":"..."}]}',`List all files in folder ID: ${id}`);return parseJ(text,results)||{files:[]}}
-async function driveReadFileText(id){const{text,results}=await driveCall('Return the full content of the requested Drive file as plain text.',`Read full content of file ID: ${id}`,8000);for(const r of results){const t=r.content?.[0]?.text||'';if(t.startsWith('[')||t.startsWith('{'))return t;}return text}
-async function driveWriteJSON(folderId,fileId,name,content){const action=fileId?`Update Drive file ID "${fileId}" with this content`:`Create plain-text file "${name}" in Drive folder "${folderId}" with this content`;const{text,results}=await driveCall('You are a Drive file writer. Respond ONLY with JSON {"success":true,"fileId":"..."}',`${action}:\n\n${content}`);return parseJ(text,results)||{success:true}}
-async function driveCreateFolder(parentId,name){const{text,results}=await driveCall('Create a subfolder in Drive. Respond ONLY with JSON {"success":true,"folderId":"..."}',`Create subfolder "${name}" inside Drive folder "${parentId}"`);return parseJ(text,results)||{success:false}}
+
+async function driveWriteJSON(folderId,fileId,name,content){
+  const blob=new Blob([content],{type:'application/json'});
+  if(fileId){
+    // Update existing file
+    const r=await driveRequest(
+      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+      {method:'PATCH',headers:{'Content-Type':'application/json'},body:blob}
+    );
+    const d=await r.json();
+    return{success:true,fileId:d.id||fileId};
+  } else {
+    // Create new file with metadata
+    const meta=JSON.stringify({name,parents:[folderId]});
+    const form=new FormData();
+    form.append('metadata',new Blob([meta],{type:'application/json'}));
+    form.append('file',blob);
+    const r=await driveRequest(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {method:'POST',body:form}
+    );
+    const d=await r.json();
+    return{success:true,fileId:d.id};
+  }
+}
+
+async function driveCreateFolder(parentId,name){
+  const meta={name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]};
+  const r=await driveRequest(
+    'https://www.googleapis.com/drive/v3/files?fields=id',
+    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(meta)}
+  );
+  const d=await r.json();
+  return{success:true,folderId:d.id};
+}
+
 async function driveUploadBase64(parentFolderId,filename,base64data,mimeType){
+  // Convert base64 dataUrl to binary blob
   const b64=base64data.includes(',')?base64data.split(',')[1]:base64data;
-  const{text,results}=await driveCall(
-    'Upload a base64-encoded file to Drive. Respond ONLY with JSON {"success":true,"fileId":"...","viewUrl":"https://drive.google.com/file/d/ID/view"}',
-    `Upload file to folder "${parentFolderId}". Filename: "${filename}". MIME: "${mimeType}". Base64 (first 100 chars): ${b64.substring(0,100)}...`,1000);
-  const p=parseJ(text,results);
-  if(p&&p.fileId)return{success:true,fileId:p.fileId,viewUrl:p.viewUrl||`https://drive.google.com/file/d/${p.fileId}/view`};
+  const binary=atob(b64);
+  const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  const blob=new Blob([bytes],{type:mimeType});
+
+  const meta=JSON.stringify({name:filename,parents:[parentFolderId]});
+  const form=new FormData();
+  form.append('metadata',new Blob([meta],{type:'application/json'}));
+  form.append('file',blob);
+  const r=await driveRequest(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+    {method:'POST',body:form}
+  );
+  const d=await r.json();
+  if(d.id){
+    return{success:true,fileId:d.id,viewUrl:`https://drive.google.com/file/d/${d.id}/view`};
+  }
   return{success:false};
 }
 
-// Fetch an image from Drive as dataUrl for PDF embedding
 async function driveGetImageDataUrl(fileId){
   try{
-    // Use Drive export/download URL with CORS proxy approach via fetch
-    const url=`https://drive.google.com/uc?export=download&id=${fileId}`;
-    const r=await fetch(url,{mode:'cors'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
+    const r=await driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     const blob=await r.blob();
     return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob);});
-  }catch(e){
-    // Fallback: try thumbnail URL
-    try{
-      const url2=`https://drive.google.com/thumbnail?id=${fileId}&sz=w2000`;
-      const r2=await fetch(url2,{mode:'cors'});
-      if(!r2.ok) throw new Error();
-      const blob2=await r2.blob();
-      return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob2);});
-    }catch(e2){return null;}
-  }
+  }catch(e){return null;}
 }
 
 // =====================================================
 //  DRIVE CONNECT/SYNC
 // =====================================================
+function openDriveModal(){
+  document.getElementById('driveModal').classList.add('open');
+  if(oauthToken){
+    document.getElementById('driveSignedOut').style.display='none';
+    document.getElementById('driveSignedIn').style.display='block';
+    if(driveConfig){
+      document.getElementById('folderIdInputSignedIn').value=driveConfig.folderId||'';
+      document.getElementById('disconnectBtn').style.display='inline-flex';
+    }
+    onSignedIn();
+  } else {
+    document.getElementById('driveSignedOut').style.display='block';
+    document.getElementById('driveSignedIn').style.display='none';
+    document.getElementById('disconnectBtn').style.display='none';
+    showDriveStatus('');
+  }
+}
+function closeDriveModal(){document.getElementById('driveModal').classList.remove('open')}
+function setDriveBadge(state,text){const b=document.getElementById('driveStatusBadge');b.className='drive-status '+state;document.getElementById('driveStatusText').textContent=text;const w=document.getElementById('driveWarning');if(w)w.style.display=(state==='disconnected'?'block':'none')}
+function showDriveStatus(msg,panel){const id=panel===2?'driveConnectStatus2':'driveConnectStatus';const el=document.getElementById(id);if(el)el.textContent=msg;}
+
 async function connectDrive(){
-  const folderId=document.getElementById('folderIdInput').value.trim();
-  if(!folderId){showDriveStatus('Please enter a folder ID');return;}
-  showDriveStatus('Connecting…');setDriveBadge('syncing','Connecting…');
+  const inp=document.getElementById('folderIdInputSignedIn');
+  const folderId=(inp?inp.value.trim():'')||'';
+  if(!folderId){showDriveStatus('Please enter your Drive folder ID',2);return;}
+  if(!oauthToken){showDriveStatus('Please sign in first',2);return;}
+  showDriveStatus('Connecting…',2);setDriveBadge('syncing','Connecting…');
   try{
     const listing=await driveListFolder(folderId);
     const files=listing.files||[];
     const df=files.find(f=>f.name==='swcp-walks.json');
     let dataFileId=df?df.id:null;
     driveConfig={folderId,dataFileId};
-    if(df){showDriveStatus('Loading existing data…');const c=await driveReadFileText(df.id);try{const l=JSON.parse(c);if(Array.isArray(l)){const ex=new Set(l.map(w=>w.id));walks=[...l,...walks.filter(w=>!ex.has(w.id))];saveLocal();}}catch(e){}}
-    else{showDriveStatus('Creating data file…');const res=await driveWriteJSON(folderId,null,'swcp-walks.json',JSON.stringify(walks,null,2));if(res.fileId)driveConfig.dataFileId=res.fileId;}
+    if(df){
+      showDriveStatus('Loading existing data…',2);
+      const c=await driveReadFileText(df.id);
+      try{const l=JSON.parse(c);if(Array.isArray(l)){const ex=new Set(l.map(w=>w.id));walks=[...l,...walks.filter(w=>!ex.has(w.id))];saveLocal();}}catch(e){}
+    } else {
+      showDriveStatus('Creating data file…',2);
+      const res=await driveWriteJSON(folderId,null,'swcp-walks.json',JSON.stringify(walks,null,2));
+      if(res.fileId)driveConfig.dataFileId=res.fileId;
+    }
     saveDriveConfig();setDriveBadge('connected','Drive connected');
-    showDriveStatus('✓ Connected! '+walks.length+' walk(s).');
+    showDriveStatus('✓ Connected! '+walks.length+' walk(s).',2);
     document.getElementById('disconnectBtn').style.display='inline-flex';
     updateStats();renderHome();showToast('Google Drive connected','success');closeDriveModal();
-  }catch(e){showDriveStatus('Failed: '+e.message);setDriveBadge('disconnected','Drive — failed');showToast('Drive connection failed','error');}
+  }catch(e){showDriveStatus('Failed: '+e.message,2);setDriveBadge('disconnected','Drive — failed');showToast('Drive connection failed','error');}
 }
 async function syncToDrive(){
-  if(!driveConfig||isSyncing)return;isSyncing=true;setDriveBadge('syncing','Saving…');
+  if(!driveConfig||isSyncing)return;
+  if(!oauthToken){setDriveBadge('disconnected','Session expired — reconnect Drive');return;}
+  isSyncing=true;setDriveBadge('syncing','Saving…');
   try{const res=await driveWriteJSON(driveConfig.folderId,driveConfig.dataFileId,'swcp-walks.json',JSON.stringify(walks,null,2));if(res.fileId&&!driveConfig.dataFileId){driveConfig.dataFileId=res.fileId;saveDriveConfig();}setDriveBadge('connected','Drive — saved ✓');}
   catch(e){setDriveBadge('connected','Drive — sync error');showToast('Drive sync failed','error');}
   isSyncing=false;
 }
 async function syncFromDrive(){
-  if(!driveConfig){openDriveModal();return;}
+  if(!driveConfig||!oauthToken){openDriveModal();return;}
   setDriveBadge('syncing','Loading…');showToast('Refreshing from Drive…');
   try{const listing=await driveListFolder(driveConfig.folderId);const df=(listing.files||[]).find(f=>f.name==='swcp-walks.json');if(df){const c=await driveReadFileText(df.id);const l=JSON.parse(c);if(Array.isArray(l)){walks=l;saveLocal();updateStats();renderHistory();renderHome();showToast(walks.length+' walks loaded','success');}}setDriveBadge('connected','Drive connected');}
   catch(e){showToast('Refresh failed: '+e.message,'error');setDriveBadge('connected','Drive — error');}
 }
-function disconnectDrive(){if(!confirm('Disconnect Drive?'))return;driveConfig=null;localStorage.removeItem('swcp_drive');setDriveBadge('disconnected','Google Drive — not connected');document.getElementById('disconnectBtn').style.display='none';closeDriveModal();showToast('Drive disconnected');}
+function disconnectDrive(){
+  if(!confirm('Sign out and disconnect Drive? Your locally saved walks will be kept.'))return;
+  const tok=oauthToken;
+  driveConfig=null;oauthToken=null;
+  localStorage.removeItem('swcp_drive');localStorage.removeItem('swcp_token');
+  if(typeof google!=='undefined'&&google.accounts&&tok)google.accounts.oauth2.revoke(tok,()=>{});
+  setDriveBadge('disconnected','Google Drive — not connected');
+  document.getElementById('disconnectBtn').style.display='none';
+  document.getElementById('driveSignedOut').style.display='block';
+  document.getElementById('driveSignedIn').style.display='none';
+  closeDriveModal();showToast('Signed out and disconnected');
+}
 
 // Upload photos to a walk subfolder
 function walkFolderName(num,title){return String(num).padStart(2,'0')+'-'+(title||'walk').replace(/[^a-zA-Z0-9\s]/g,'').replace(/\s+/g,'-').substring(0,40);}
@@ -1532,8 +1721,11 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
   loadLocal();
   document.getElementById('fDate').value=new Date().toISOString().split('T')[0];
   updateStats();renderHome();
-  if(driveConfig)setDriveBadge('connected','Drive connected');
+  if(driveConfig&&oauthToken)setDriveBadge('connected','Drive connected');
+  else if(driveConfig&&!oauthToken)setDriveBadge('disconnected','Drive — sign in to sync');
   else setDriveBadge('disconnected','Google Drive — not connected');
+  // Initialise Google Identity Services
+  initGIS();
 })();
 </script>
 </body>
