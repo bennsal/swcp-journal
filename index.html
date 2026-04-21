@@ -1,0 +1,1540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>South West Coast Path — Walk Journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+/* ── DESIGN TOKENS ── */
+:root {
+  --blue:#1a3a5c; --blue-mid:#2a5580; --blue-light:#4a7fa8;
+  --sand:#e8dfc8; --sand-light:#f5f0e4; --sand-deep:#d4c8a8;
+  --slate:#4a4e54; --slate-light:#7a8088;
+  --copper:#b5603a; --copper-light:#c8855a;
+  --charcoal:#2c2c2c; --white:#fdfbf7;
+  --green:#2d6a4f; --green-light:#3d8a64;
+  --rule:1px solid var(--blue);
+  --rule-faint:1px solid rgba(26,58,92,0.15);
+  --font-body:'EB Garamond','Georgia',serif;
+  --font-display:'Cormorant Garamond','Georgia',serif;
+  --font-ui:'Montserrat','Helvetica Neue',sans-serif;
+  --radius:4px;
+  --shadow:0 2px 16px rgba(26,58,92,.10);
+  --shadow-lg:0 8px 40px rgba(26,58,92,.14);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px;scroll-behavior:smooth}
+body{background:var(--sand-light);color:var(--charcoal);font-family:var(--font-body);font-size:1.05rem;line-height:1.6;min-height:100vh}
+
+/* ── LAYOUT ── */
+.sidebar{width:252px;flex-shrink:0;background:var(--blue);color:var(--sand-light);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto}
+.sidebar-brand{padding:26px 22px 18px;border-bottom:1px solid rgba(255,255,255,.12)}
+.sidebar-brand .compass{font-size:1.9rem;display:block;margin-bottom:7px;opacity:.9}
+.sidebar-brand h1{font-family:var(--font-display);font-size:1.05rem;font-weight:400;letter-spacing:.04em;line-height:1.3;color:var(--sand-light)}
+.sidebar-brand .subtitle{font-family:var(--font-ui);font-size:.58rem;letter-spacing:.15em;text-transform:uppercase;color:rgba(232,223,200,.5);margin-top:4px}
+.sidebar-nav{padding:14px 0;flex:1}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 22px;cursor:pointer;font-family:var(--font-ui);font-size:.73rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:rgba(232,223,200,.65);transition:all .2s;border-left:3px solid transparent}
+.nav-item:hover{color:var(--sand-light);background:rgba(255,255,255,.06)}
+.nav-item.active{color:var(--sand-light);border-left-color:var(--copper);background:rgba(255,255,255,.08)}
+.nav-icon{font-size:.95rem;width:20px;text-align:center}
+.drive-status{margin:0 14px 10px;padding:8px 11px;border-radius:var(--radius);font-family:var(--font-ui);font-size:.6rem;letter-spacing:.06em;display:flex;align-items:center;gap:6px;cursor:pointer;transition:all .2s}
+.drive-status.connected{background:rgba(45,106,79,.3);color:#7ecfac;border:1px solid rgba(126,207,172,.3)}
+.drive-status.disconnected{background:rgba(181,96,58,.2);color:var(--copper-light);border:1px solid rgba(181,96,58,.3)}
+.drive-status.syncing{background:rgba(74,127,168,.2);color:#9bcae3;border:1px solid rgba(74,127,168,.3);animation:pulse 1.5s infinite}
+.drive-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.drive-status.connected .drive-dot{background:#7ecfac}
+.drive-status.disconnected .drive-dot{background:var(--copper-light)}
+.drive-status.syncing .drive-dot{background:#9bcae3}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.sidebar-progress{padding:14px 22px 22px;border-top:1px solid rgba(255,255,255,.12)}
+.prog-label{font-family:var(--font-ui);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:rgba(232,223,200,.5);margin-bottom:7px}
+.prog-bar-wrap{height:5px;background:rgba(255,255,255,.12);border-radius:10px;overflow:hidden;margin-bottom:5px}
+.prog-bar-fill{height:100%;background:var(--copper-light);border-radius:10px;transition:width .6s ease}
+.prog-pct{font-family:var(--font-display);font-size:1.25rem;color:var(--sand-light)}
+.prog-detail{font-family:var(--font-ui);font-size:.6rem;color:rgba(232,223,200,.5)}
+.main-content{margin-left:252px;flex:1;min-height:100vh}
+.view{display:none;padding:38px 46px;max-width:1000px}
+.view.active{display:block}
+
+/* ── PAGE HEADERS ── */
+.page-header{margin-bottom:32px;padding-bottom:18px;border-bottom:var(--rule)}
+.page-header .eyebrow{font-family:var(--font-ui);font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--copper);margin-bottom:7px}
+.page-header h2{font-family:var(--font-display);font-size:2.1rem;font-weight:300;color:var(--blue);line-height:1.1}
+
+/* ── STATS ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:13px;margin-bottom:28px}
+.stat-card{background:var(--white);border:var(--rule-faint);border-top:3px solid var(--blue);padding:17px;border-radius:var(--radius);box-shadow:var(--shadow)}
+.stat-card.copper-top{border-top-color:var(--copper)}.stat-card.slate-top{border-top-color:var(--slate)}
+.stat-value{font-family:var(--font-display);font-size:1.85rem;font-weight:400;color:var(--blue);line-height:1;margin-bottom:3px}
+.stat-label{font-family:var(--font-ui);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--slate-light)}
+.master-progress{background:var(--white);border:var(--rule-faint);border-radius:var(--radius);padding:22px;margin-bottom:28px;box-shadow:var(--shadow)}
+.master-progress-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:11px}
+.master-progress-header h3{font-family:var(--font-display);font-size:1.05rem;font-weight:400;color:var(--blue)}
+.master-progress-header .pct-text{font-family:var(--font-display);font-size:1.5rem;color:var(--copper)}
+.master-bar{height:11px;background:var(--sand);border-radius:10px;overflow:hidden;position:relative}
+.master-bar-fill{height:100%;background:linear-gradient(90deg,var(--blue) 0%,var(--blue-light) 100%);border-radius:10px;transition:width .8s ease;position:relative}
+.master-bar-fill::after{content:'';position:absolute;right:0;top:0;bottom:0;width:3px;background:var(--copper);border-radius:2px}
+.progress-landmarks{display:flex;justify-content:space-between;margin-top:5px}
+.landmark-label{font-family:var(--font-ui);font-size:.56rem;color:var(--slate-light)}
+.section-title{font-family:var(--font-display);font-size:1.25rem;font-weight:400;color:var(--blue);margin-bottom:14px;padding-bottom:7px;border-bottom:var(--rule-faint)}
+.walk-feed-item{background:var(--white);border:var(--rule-faint);border-radius:var(--radius);padding:16px 18px;margin-bottom:11px;box-shadow:var(--shadow);cursor:pointer;transition:all .2s;display:flex;gap:18px;align-items:flex-start}
+.walk-feed-item:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+.walk-feed-date-block{text-align:center;flex-shrink:0;width:46px}
+.walk-feed-day{font-family:var(--font-display);font-size:1.55rem;color:var(--blue);line-height:1}
+.walk-feed-month{font-family:var(--font-ui);font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;color:var(--slate-light)}
+.walk-feed-content{flex:1}
+.walk-feed-title{font-family:var(--font-display);font-size:1rem;font-weight:500;color:var(--blue);margin-bottom:3px}
+.walk-feed-meta{font-family:var(--font-ui);font-size:.66rem;color:var(--slate-light);display:flex;gap:11px;flex-wrap:wrap}
+.walk-feed-excerpt{font-size:.86rem;color:var(--slate);margin-top:5px;font-style:italic;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.walk-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.tag{font-family:var(--font-ui);font-size:.56rem;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:20px;background:var(--sand);color:var(--slate);border:1px solid var(--sand-deep)}
+.tag.favourite{background:rgba(181,96,58,.1);border-color:var(--copper-light);color:var(--copper)}
+
+/* ── FORM ── */
+.form-section{background:var(--white);border:var(--rule-faint);border-radius:var(--radius);padding:24px;margin-bottom:18px;box-shadow:var(--shadow)}
+.form-section-title{font-family:var(--font-display);font-size:1.08rem;font-weight:500;color:var(--blue);margin-bottom:16px;padding-bottom:9px;border-bottom:var(--rule-faint);display:flex;align-items:center;gap:8px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.form-grid.thirds{grid-template-columns:1fr 1fr 1fr}.form-grid.full{grid-template-columns:1fr}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-family:var(--font-ui);font-size:.63rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--slate)}
+.field input,.field select,.field textarea{font-family:var(--font-body);font-size:.93rem;color:var(--charcoal);background:var(--sand-light);border:1px solid var(--sand-deep);border-radius:var(--radius);padding:8px 11px;transition:border-color .2s,box-shadow .2s;appearance:none}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--blue-light);box-shadow:0 0 0 3px rgba(74,127,168,.15);background:var(--white)}
+.field textarea{resize:vertical;min-height:90px;line-height:1.6}
+.star-rating{display:flex;gap:5px}.star{font-size:1.35rem;cursor:pointer;color:var(--sand-deep);transition:color .15s,transform .1s;line-height:1}
+.star.active{color:var(--copper)}.star:hover{transform:scale(1.1)}
+.checkbox-group{display:flex;flex-wrap:wrap;gap:7px;margin-top:3px}
+.checkbox-pill input{display:none}
+.checkbox-pill label{display:block;padding:4px 11px;border-radius:20px;border:1px solid var(--sand-deep);font-family:var(--font-ui);font-size:.63rem;font-weight:500;letter-spacing:.05em;cursor:pointer;background:var(--sand-light);color:var(--slate);transition:all .15s;user-select:none}
+.checkbox-pill input:checked+label{background:var(--blue);border-color:var(--blue);color:var(--sand-light)}
+input[type=range]{-webkit-appearance:none;height:4px;border-radius:4px;background:var(--sand-deep);outline:none;padding:0;border:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid var(--white);box-shadow:0 1px 4px rgba(0,0,0,.2)}
+.range-wrap{display:flex;align-items:center;gap:11px}.range-wrap input{flex:1}
+.range-value{font-family:var(--font-display);font-size:1.15rem;color:var(--blue);min-width:38px;text-align:right}
+.tags-input-wrap{display:flex;flex-wrap:wrap;gap:5px;align-items:center;border:1px solid var(--sand-deep);border-radius:var(--radius);padding:5px 8px;background:var(--sand-light);min-height:38px}
+.tags-input-wrap input{border:none;background:transparent;font-size:.83rem;font-family:var(--font-body);outline:none;flex:1;min-width:70px;padding:2px 4px}
+.tag-remove{background:none;border:none;cursor:pointer;font-size:.68rem;color:var(--slate-light);margin-left:2px;padding:0;line-height:1}.tag-remove:hover{color:var(--copper)}
+.form-actions{display:flex;gap:11px;margin-top:8px;flex-wrap:wrap}
+.btn{font-family:var(--font-ui);font-size:.68rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;padding:10px 20px;border-radius:var(--radius);cursor:pointer;border:2px solid transparent;transition:all .2s;white-space:nowrap}
+.btn-primary{background:var(--blue);color:var(--sand-light);border-color:var(--blue)}.btn-primary:hover{background:var(--blue-mid)}.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:transparent;color:var(--blue);border-color:var(--blue-light)}.btn-secondary:hover{background:var(--sand)}
+.btn-copper{background:var(--copper);color:var(--white);border-color:var(--copper)}.btn-copper:hover{background:var(--copper-light)}.btn-copper:disabled{opacity:.5;cursor:not-allowed}
+.btn-green{background:var(--green);color:var(--white);border-color:var(--green)}.btn-green:hover{background:var(--green-light)}
+.btn-danger{background:transparent;color:var(--copper);border-color:var(--copper-light)}.btn-danger:hover{background:rgba(181,96,58,.08)}
+
+/* ── PEOPLE & PETS ── */
+.person-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.person-chip{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--sand-light);border:1px solid var(--sand-deep);border-radius:var(--radius)}
+.person-chip .person-name{font-family:var(--font-body);font-size:.92rem;flex:1}
+.person-chip .person-role{font-family:var(--font-ui);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--slate-light);background:var(--sand);padding:2px 7px;border-radius:10px}
+.person-chip .remove-person{background:none;border:none;cursor:pointer;color:var(--slate-light);font-size:.75rem;padding:2px 4px;border-radius:3px;transition:color .15s}.person-chip .remove-person:hover{color:var(--copper)}
+.add-person-row{display:flex;gap:8px;align-items:flex-end}
+.add-person-row .field{flex:1}.add-person-row select{padding:8px 11px}
+
+/* ── PHOTOS & GPX ── */
+.media-tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--sand-deep)}
+.media-tab{padding:8px 16px;font-family:var(--font-ui);font-size:.68rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;color:var(--slate-light);border-bottom:2px solid transparent;transition:all .15s;margin-bottom:-1px}
+.media-tab.active{color:var(--blue);border-bottom-color:var(--copper)}
+.media-panel{display:none}.media-panel.active{display:block}
+
+.photo-drop{border:2px dashed var(--sand-deep);border-radius:var(--radius);padding:26px;text-align:center;cursor:pointer;transition:all .2s;background:var(--sand-light)}
+.photo-drop:hover,.photo-drop.drag-over{border-color:var(--blue-light);background:rgba(74,127,168,.04)}
+.photo-drop input{display:none}
+.photo-drop-icon{font-size:1.7rem;margin-bottom:7px}
+.photo-drop-text{font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light);letter-spacing:.04em}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:14px}
+.photo-thumb{position:relative;aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;border:2px solid var(--sand-deep);cursor:pointer;transition:border-color .2s;background:var(--sand)}
+.photo-thumb:hover{border-color:var(--copper)}
+.photo-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-thumb .photo-overlay{position:absolute;inset:0;background:rgba(26,58,92,.6);opacity:0;transition:opacity .2s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.photo-thumb:hover .photo-overlay{opacity:1}
+.photo-overlay-btn{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:3px;font-family:var(--font-ui);font-size:.58rem;letter-spacing:.06em;padding:3px 8px;cursor:pointer;transition:background .15s;text-decoration:none;display:inline-block}
+.photo-overlay-btn:hover{background:rgba(255,255,255,.3)}
+.photo-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block}
+.photo-status-dot.local{background:var(--copper-light)}.photo-status-dot.drive{background:#7ecfac}.photo-status-dot.uploading{background:#9bcae3;animation:pulse 1s infinite}
+
+/* GPX panel */
+.gpx-drop{border:2px dashed var(--sand-deep);border-radius:var(--radius);padding:24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--sand-light)}
+.gpx-drop:hover,.gpx-drop.drag-over{border-color:var(--green-light);background:rgba(45,106,79,.04)}
+.gpx-drop input{display:none}
+.gpx-drop-icon{font-size:1.6rem;margin-bottom:6px}
+.gpx-drop-text{font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light)}
+#gpxMapPreview{width:100%;height:260px;border-radius:var(--radius);border:2px solid var(--sand-deep);margin-top:14px;display:none}
+.gpx-meta{display:flex;gap:16px;margin-top:10px;flex-wrap:wrap}
+.gpx-meta-item{font-family:var(--font-ui);font-size:.7rem;color:var(--slate)}
+.gpx-meta-item strong{color:var(--blue);font-weight:600}
+.gpx-status{font-family:var(--font-ui);font-size:.7rem;margin-top:8px;padding:6px 10px;border-radius:var(--radius);display:none}
+.gpx-status.ok{background:rgba(45,106,79,.1);color:var(--green);border:1px solid rgba(45,106,79,.2)}
+.gpx-status.uploading{background:rgba(74,127,168,.1);color:var(--blue-mid);border:1px solid rgba(74,127,168,.2)}
+.gpx-status.err{background:rgba(181,96,58,.1);color:var(--copper);border:1px solid rgba(181,96,58,.2)}
+
+/* Drive photos panel in history */
+.drive-photos-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.drive-photo-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:var(--radius);background:var(--sand-light);border:1px solid var(--sand-deep);font-family:var(--font-ui);font-size:.62rem;color:var(--slate);text-decoration:none;transition:all .15s}
+.drive-photo-chip:hover{background:var(--blue);color:var(--sand-light);border-color:var(--blue)}
+
+/* ── HISTORY ── */
+.history-controls{display:flex;gap:11px;margin-bottom:22px;align-items:center;flex-wrap:wrap}
+.history-search{font-family:var(--font-body);font-size:.88rem;padding:8px 13px;border:1px solid var(--sand-deep);border-radius:var(--radius);background:var(--white);flex:1;min-width:150px}
+.history-search:focus{outline:none;border-color:var(--blue-light)}
+.walk-card{background:var(--white);border:var(--rule-faint);border-radius:var(--radius);margin-bottom:13px;box-shadow:var(--shadow);overflow:hidden}
+.walk-card-header{padding:15px 18px;display:flex;gap:14px;align-items:flex-start;cursor:pointer;transition:background .15s}
+.walk-card-header:hover{background:var(--sand-light)}
+.walk-card-expand{margin-left:auto;font-size:.73rem;color:var(--slate-light);transition:transform .2s;flex-shrink:0}
+.walk-card.open .walk-card-expand{transform:rotate(180deg)}
+.walk-card-body{display:none;padding:0 18px 18px;border-top:var(--rule-faint)}
+.walk-card.open .walk-card-body{display:block}
+.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:9px;margin:13px 0;padding:13px;background:var(--sand-light);border-radius:var(--radius)}
+.meta-key{font-family:var(--font-ui);font-size:.56rem;letter-spacing:.12em;text-transform:uppercase;color:var(--slate-light);margin-bottom:2px}
+.meta-val{font-family:var(--font-body);font-size:.9rem;color:var(--charcoal)}
+.reflections-display{font-family:var(--font-body);font-size:.98rem;line-height:1.8;color:var(--charcoal);margin:13px 0;padding:16px 18px;background:var(--sand-light);border-left:3px solid var(--copper);border-radius:0 var(--radius) var(--radius) 0;font-style:italic}
+.reflections-display::first-letter{font-family:var(--font-display);font-size:2.5em;font-weight:600;color:var(--blue);float:left;line-height:.75;margin:.08em .08em 0 0}
+.card-actions{display:flex;gap:9px;margin-top:11px;padding-top:11px;border-top:var(--rule-faint);flex-wrap:wrap}
+.people-display{display:flex;flex-wrap:wrap;gap:6px;margin:5px 0}
+.people-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-family:var(--font-ui);font-size:.6rem;letter-spacing:.05em;border:1px solid var(--sand-deep);background:var(--sand-light);color:var(--slate)}
+.people-badge.walker{border-color:var(--blue-light);background:rgba(74,127,168,.1);color:var(--blue-mid)}
+.people-badge.pet{border-color:var(--copper-light);background:rgba(181,96,58,.1);color:var(--copper)}
+
+/* ── MODALS ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(26,58,92,.55);z-index:200;overflow-y:auto;padding:40px 20px;align-items:flex-start;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal-card{background:var(--white);border-radius:var(--radius);max-width:660px;width:100%;box-shadow:var(--shadow-lg);overflow:hidden;position:relative}
+.modal-header{padding:22px 26px 14px;border-bottom:var(--rule-faint);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:var(--font-display);font-size:1.25rem;font-weight:400;color:var(--blue)}
+.modal-close{background:none;border:none;font-size:1.05rem;cursor:pointer;color:var(--slate-light);padding:4px;border-radius:50%;transition:color .15s}.modal-close:hover{color:var(--copper)}
+.modal-body{padding:22px 26px}
+.setup-step{display:flex;gap:13px;margin-bottom:16px;align-items:flex-start}
+.step-num{width:24px;height:24px;border-radius:50%;background:var(--blue);color:var(--sand-light);font-family:var(--font-ui);font-size:.65rem;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.step-text h4{font-family:var(--font-ui);font-size:.72rem;font-weight:600;letter-spacing:.05em;color:var(--charcoal);margin-bottom:3px}
+.step-text p{font-size:.83rem;color:var(--slate);line-height:1.5}
+.folder-id-input{width:100%;font-family:'Courier New',monospace;font-size:.8rem;padding:9px 13px;border:1px solid var(--sand-deep);border-radius:var(--radius);background:var(--sand-light);margin-top:7px}
+.folder-id-input:focus{outline:none;border-color:var(--blue-light)}
+.export-log{font-family:'Courier New',monospace;font-size:.73rem;background:var(--charcoal);color:#a8d8b8;padding:13px;border-radius:var(--radius);max-height:200px;overflow-y:auto;margin-top:13px;line-height:1.8}
+.export-log .log-line.done{color:#7ecfac}.export-log .log-line.err{color:#f08080}
+.month-bar-row{margin-bottom:9px}
+.month-bar-label{display:flex;justify-content:space-between;margin-bottom:3px}
+.month-bar-name{font-family:var(--font-ui);font-size:.68rem;color:var(--slate)}
+.month-bar-km{font-family:var(--font-display);font-size:.88rem;color:var(--blue)}
+.month-bar{height:7px;background:var(--sand);border-radius:3px;overflow:hidden}
+.month-bar-fill{height:100%;background:var(--blue-light);border-radius:3px;transition:width .5s}
+.lightbox{display:none;position:fixed;inset:0;background:rgba(26,58,92,.92);z-index:300;align-items:center;justify-content:center}
+.lightbox.open{display:flex}
+.lightbox img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:var(--radius)}
+.lightbox-close{position:absolute;top:18px;right:22px;color:var(--sand-light);font-size:1.4rem;cursor:pointer;background:none;border:none}
+.toast{position:fixed;bottom:22px;right:22px;background:var(--blue);color:var(--sand-light);padding:11px 18px;border-radius:var(--radius);font-family:var(--font-ui);font-size:.7rem;letter-spacing:.05em;box-shadow:var(--shadow-lg);transform:translateY(60px);opacity:0;transition:all .3s;z-index:500;border-left:3px solid var(--copper);max-width:300px}
+.toast.show{transform:translateY(0);opacity:1}.toast.error{border-left-color:#e05a5a;background:#3d1a1a}.toast.success{border-left-color:#7ecfac}
+.empty-state{text-align:center;padding:56px 20px;color:var(--slate-light)}
+.empty-state .empty-icon{font-size:2.8rem;margin-bottom:14px;opacity:.4}
+.empty-state h3{font-family:var(--font-display);font-size:1.35rem;font-weight:300;color:var(--slate);margin-bottom:7px}
+.empty-state p{font-size:.88rem;margin-bottom:18px}
+.info-note{padding:11px 15px;background:rgba(74,127,168,.08);border:1px solid rgba(74,127,168,.2);border-radius:var(--radius);font-family:var(--font-ui);font-size:.7rem;color:var(--blue-mid);line-height:1.5;margin-bottom:14px}
+.mob-toggle{display:none;position:fixed;top:12px;left:12px;z-index:150;background:var(--blue);color:var(--sand-light);border:none;border-radius:var(--radius);padding:8px 10px;font-size:1.1rem;cursor:pointer}
+@media(max-width:768px){.mob-toggle{display:block}.sidebar{transform:translateX(-100%);transition:transform .3s}.sidebar.open{transform:translateX(0)}.main-content{margin-left:0}.view{padding:22px 15px}.form-grid,.form-grid.thirds{grid-template-columns:1fr}}
+
+/* Hidden map container for GPX rendering */
+#gpxHiddenMap{position:fixed;left:-9999px;top:0;width:800px;height:500px;z-index:-1;background:#f0f4f8}
+
+@media print{
+  .sidebar,.mob-toggle,.form-actions,.card-actions,.history-controls,.btn,.walk-card-expand,.drive-status,.gpx-drop,.photo-drop{display:none!important}
+  .main-content{margin-left:0}
+  .view{display:block!important;padding:0;max-width:none}
+  #view-history{display:block!important}
+  #view-home,#view-log,#view-progress{display:none!important}
+  .walk-card-body{display:block!important}
+  .walk-card{break-inside:avoid;margin-bottom:28px;box-shadow:none;border:1px solid #ccc}
+  body{background:white;font-size:11pt}
+}
+</style>
+</head>
+<body>
+
+<!-- Hidden map div for GPX rendering (off-screen) -->
+<div id="gpxHiddenMap"></div>
+
+<button class="mob-toggle" id="mobToggle" onclick="toggleSidebar()">☰</button>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <span class="compass">⊕</span>
+    <h1>South West Coast Path</h1>
+    <div class="subtitle">Walk Journal</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-view="home"     onclick="showView('home',this)"><span class="nav-icon">⌂</span> Dashboard</div>
+    <div class="nav-item"        data-view="log"      onclick="showView('log',this)"><span class="nav-icon">✦</span> Log a Walk</div>
+    <div class="nav-item"        data-view="history"  onclick="showView('history',this)"><span class="nav-icon">≡</span> My Walks</div>
+    <div class="nav-item"        data-view="progress" onclick="showView('progress',this)"><span class="nav-icon">◎</span> Progress</div>
+  </nav>
+  <div id="driveStatusBadge" class="drive-status disconnected" onclick="openDriveModal()">
+    <span class="drive-dot"></span><span id="driveStatusText">Google Drive — not connected</span>
+  </div>
+  <div class="sidebar-progress">
+    <div class="prog-label">Route completed</div>
+    <div class="prog-bar-wrap"><div class="prog-bar-fill" id="sidebarFill" style="width:0%"></div></div>
+    <div class="prog-pct" id="sidebarPct">0%</div>
+    <div class="prog-detail" id="sidebarDetail">0 km of 630 km</div>
+  </div>
+</aside>
+
+<main class="main-content">
+
+  <!-- HOME -->
+  <div class="view active" id="view-home">
+    <div class="page-header"><div class="eyebrow">Somerset to Dorset</div><h2>Your Journey</h2></div>
+    <div class="master-progress">
+      <div class="master-progress-header"><h3>South West Coast Path — 630 km</h3><span class="pct-text" id="masterPct">0%</span></div>
+      <div class="master-bar"><div class="master-bar-fill" id="masterBarFill" style="width:0%"></div></div>
+      <div class="progress-landmarks"><span class="landmark-label">Minehead</span><span class="landmark-label">Padstow</span><span class="landmark-label">Land's End</span><span class="landmark-label">Plymouth</span><span class="landmark-label">Weymouth</span><span class="landmark-label">Poole</span></div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value" id="statKm">0</div><div class="stat-label">Kilometres walked</div></div>
+      <div class="stat-card copper-top"><div class="stat-value" id="statWalks">0</div><div class="stat-label">Walks completed</div></div>
+      <div class="stat-card slate-top"><div class="stat-value" id="statElev">0</div><div class="stat-label">Metres ascent</div></div>
+      <div class="stat-card"><div class="stat-value" id="statHours">0</div><div class="stat-label">Hours on path</div></div>
+      <div class="stat-card copper-top"><div class="stat-value" id="statRemain">630</div><div class="stat-label">Kilometres remaining</div></div>
+    </div>
+    <div class="section-title">Recent Walks</div>
+    <div id="recentFeed"><div class="empty-state"><div class="empty-icon">🌊</div><h3>No walks yet</h3><p>Connect Drive then log your first walk.</p><button class="btn btn-primary" onclick="showView('log')">Log Your First Walk</button></div></div>
+  </div>
+
+  <!-- LOG WALK -->
+  <div class="view" id="view-log">
+    <div class="page-header"><div class="eyebrow">New Entry</div><h2 id="logFormTitle">Log a Walk</h2></div>
+    <div class="info-note" id="driveWarning" style="display:none">⚠ Drive not connected — walk will be saved locally only. <a href="#" onclick="openDriveModal();return false;" style="color:var(--blue);font-weight:600">Connect Drive</a></div>
+    <form id="walkForm" onsubmit="saveWalk(event)">
+
+      <div class="form-section">
+        <div class="form-section-title"><span>📍</span> Walk Details</div>
+        <div class="form-grid">
+          <div class="field"><label>Walk Date</label><input type="date" id="fDate" required></div>
+          <div class="field"><label>Stage Name / Title</label><input type="text" id="fTitle" placeholder="e.g. Minehead to Porlock Weir" required></div>
+          <div class="field"><label>Start Location</label><input type="text" id="fStart" placeholder="e.g. Minehead" required></div>
+          <div class="field"><label>Finish Location</label><input type="text" id="fFinish" placeholder="e.g. Porlock Weir" required></div>
+          <div class="field"><label>Start Time</label><input type="time" id="fStartTime"></div>
+          <div class="field"><label>Finish Time</label><input type="time" id="fFinishTime"></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span>📏</span> Distances & Terrain</div>
+        <div class="form-grid thirds">
+          <div class="field"><label>Distance (km)</label><input type="number" id="fDistance" step="0.1" min="0" placeholder="13.5"></div>
+          <div class="field"><label>Elevation Gain (m)</label><input type="number" id="fElevation" step="1" min="0" placeholder="380"></div>
+          <div class="field"><label>Walking Time (hrs)</label><input type="number" id="fWalkTime" step="0.25" min="0" placeholder="auto"></div>
+        </div>
+        <div style="margin-top:14px">
+          <div class="field"><label>Terrain Type</label>
+            <div class="checkbox-group">
+              <div class="checkbox-pill"><input type="checkbox" id="t1" value="Cliff path"><label for="t1">Cliff path</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="t2" value="Beach"><label for="t2">Beach</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="t3" value="Moorland"><label for="t3">Moorland</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="t4" value="Coastal town"><label for="t4">Coastal town</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="t5" value="Inland detour"><label for="t5">Inland detour</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="t6" value="Estuary"><label for="t6">Estuary</label></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span>🌦</span> Conditions</div>
+        <div class="form-grid">
+          <div class="field"><label>Weather</label>
+            <div class="checkbox-group">
+              <div class="checkbox-pill"><input type="checkbox" id="w1" value="Sunny"><label for="w1">☀ Sunny</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="w2" value="Cloudy"><label for="w2">☁ Cloudy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="w3" value="Rainy"><label for="w3">🌧 Rainy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="w4" value="Windy"><label for="w4">💨 Windy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="w5" value="Foggy"><label for="w5">🌫 Foggy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="w6" value="Mixed"><label for="w6">⛅ Mixed</label></div>
+            </div>
+          </div>
+          <div class="field"><label>Ground Conditions</label>
+            <div class="checkbox-group">
+              <div class="checkbox-pill"><input type="checkbox" id="g1" value="Dry"><label for="g1">Dry</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="g2" value="Muddy"><label for="g2">Muddy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="g3" value="Wet"><label for="g3">Wet</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="g4" value="Icy"><label for="g4">Icy</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="g5" value="Rocky"><label for="g5">Rocky</label></div>
+            </div>
+          </div>
+          <div class="field"><label>Temperature (°C)</label>
+            <div class="range-wrap"><input type="range" id="fTemp" min="-5" max="35" value="15" oninput="document.getElementById('tempVal').textContent=this.value+'°C'"><span class="range-value" id="tempVal">15°C</span></div>
+          </div>
+          <div class="field"><label>Visibility</label>
+            <select id="fVisibility"><option value="">— select —</option><option>Poor</option><option>Moderate</option><option>Good</option><option>Excellent</option></select>
+          </div>
+          <div class="field"><label>Tide State</label>
+            <select id="fTide"><option value="">— not applicable —</option><option>Low tide</option><option>Mid tide</option><option>High tide</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span>👥</span> People & Pets</div>
+        <div class="person-list" id="personList"></div>
+        <div class="add-person-row">
+          <div class="field" style="flex:2"><label>Name</label>
+            <input type="text" id="personNameInput" placeholder="e.g. Sarah, Max the dog…" onkeydown="if(event.key==='Enter'){event.preventDefault();addPerson()}">
+          </div>
+          <div class="field" style="flex:1"><label>Role</label>
+            <select id="personRoleInput">
+              <option value="walker">Walker</option><option value="dog">Dog 🐕</option><option value="cat">Cat 🐈</option>
+              <option value="other pet">Other pet</option><option value="guide">Guide</option><option value="met on path">Met on path</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;padding-bottom:1px"><button type="button" class="btn btn-secondary" onclick="addPerson()">+ Add</button></div>
+        </div>
+        <div class="form-grid full" style="margin-top:14px">
+          <div class="field"><label>Group Notes</label><input type="text" id="fGroupNotes" placeholder="e.g. First time all four of us completed a stage"></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span>⚡</span> Experience</div>
+        <div class="form-grid">
+          <div class="field"><label>Difficulty (1–5)</label>
+            <div class="star-rating" id="difficultyStars">
+              <span class="star" onclick="setDifficulty(1)">★</span><span class="star" onclick="setDifficulty(2)">★</span>
+              <span class="star" onclick="setDifficulty(3)">★</span><span class="star" onclick="setDifficulty(4)">★</span>
+              <span class="star" onclick="setDifficulty(5)">★</span>
+            </div>
+            <input type="hidden" id="fDifficulty" value="0">
+          </div>
+          <div class="field"><label>Facilities</label>
+            <div class="checkbox-group">
+              <div class="checkbox-pill"><input type="checkbox" id="f1" value="Café/Pub"><label for="f1">Café/Pub</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="f2" value="Water source"><label for="f2">Water</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="f3" value="Accommodation"><label for="f3">Accommodation</label></div>
+              <div class="checkbox-pill"><input type="checkbox" id="f4" value="Public WC"><label for="f4">Public WC</label></div>
+            </div>
+          </div>
+          <div class="field" style="grid-column:1/-1"><label>Notable Wildlife &amp; Flora</label>
+            <input type="text" id="fWildlife" placeholder="e.g. Peregrine falcon, sea campion in bloom">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span>✍</span> Reflections</div>
+        <div class="form-grid full">
+          <div class="field"><label>Walk Reflections</label><textarea id="fReflections" rows="6" placeholder="Mood, highlights, challenges, memorable moments…"></textarea></div>
+          <div class="field"><label>Tips for Future Walkers</label><textarea id="fTips" rows="3" placeholder="Navigation tips, transport links, stopping points…"></textarea></div>
+          <div class="field"><label>Tags</label>
+            <div class="tags-input-wrap" id="tagsWrap"><input type="text" id="tagInput" placeholder="Type tag, press Enter" onkeydown="addTag(event)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHOTOS & GPX -->
+      <div class="form-section">
+        <div class="form-section-title"><span>📷</span> Photos & Route Map</div>
+        <div class="media-tabs">
+          <div class="media-tab active" onclick="switchMediaTab('photos',this)">📷 Photographs</div>
+          <div class="media-tab" onclick="switchMediaTab('gpx',this)">🗺 GPX Route Map</div>
+          <div class="media-tab" onclick="switchMediaTab('gphotos',this)">📱 Google Photos</div>
+        </div>
+
+        <!-- Photos panel -->
+        <div class="media-panel active" id="panel-photos">
+          <div class="photo-drop" id="photoDrop"
+            onclick="document.getElementById('photoInput').click()"
+            ondragover="event.preventDefault();this.classList.add('drag-over')"
+            ondragleave="this.classList.remove('drag-over')"
+            ondrop="handlePhotoDrop(event)">
+            <input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotoInput(this)">
+            <div class="photo-drop-icon">🖼</div>
+            <div class="photo-drop-text">Drag & drop photos here, or click to browse<br><small>Full-resolution files uploaded to Drive subfolder. Embedded in PDF at export time.</small></div>
+          </div>
+          <div class="photo-grid" id="photoGrid"></div>
+        </div>
+
+        <!-- GPX panel -->
+        <div class="media-panel" id="panel-gpx">
+          <div class="gpx-drop" id="gpxDrop"
+            onclick="document.getElementById('gpxInput').click()"
+            ondragover="event.preventDefault();this.classList.add('drag-over')"
+            ondragleave="this.classList.remove('drag-over')"
+            ondrop="handleGpxDrop(event)">
+            <input type="file" id="gpxInput" accept=".gpx" onchange="handleGpxInput(this)">
+            <div class="gpx-drop-icon">🗺</div>
+            <div class="gpx-drop-text">Drag & drop your GPX file here, or click to browse<br><small>Route is rendered as a map image and stored alongside your photos in Drive</small></div>
+          </div>
+          <div id="gpxMapPreview"></div>
+          <div class="gpx-meta" id="gpxMeta"></div>
+          <div class="gpx-status" id="gpxStatus"></div>
+        </div>
+
+        <!-- Google Photos panel -->
+        <div class="media-panel" id="panel-gphotos">
+          <div style="padding:16px;background:var(--sand-light);border-radius:var(--radius);border:1px solid var(--sand-deep)">
+            <h4 style="font-family:var(--font-ui);font-size:.68rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px">📱 Adding photos from Google Photos</h4>
+            <div style="font-size:.88rem;color:var(--slate);line-height:1.7;margin-bottom:12px">
+              <strong style="color:var(--charcoal)">Option A — Save to Drive:</strong> In Google Photos, select your walk photos → Share → Save to Drive. Navigate to your SWCP folder. The walk subfolder is created automatically when you save this entry; move photos there afterwards.<br><br>
+              <strong style="color:var(--charcoal)">Option B — Shared album link:</strong> Create a shared album in Google Photos and paste the URL below. It will appear as a button in the journal and be referenced in the PDF.
+            </div>
+            <div class="field"><label>Google Photos Album Link (optional)</label>
+              <input type="url" id="fPhotosLink" placeholder="https://photos.google.com/share/…" style="font-size:.85rem">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="saveBtn">Save Walk Entry</button>
+        <button type="button" class="btn btn-secondary" onclick="resetForm()">Clear Form</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- HISTORY -->
+  <div class="view" id="view-history">
+    <div class="page-header"><div class="eyebrow">All entries</div><h2>My Walks</h2></div>
+    <div class="history-controls">
+      <input class="history-search" type="text" id="searchInput" placeholder="Search walks…" oninput="renderHistory()">
+      <button class="btn btn-copper" onclick="openExportModal()">📖 Export Book PDF</button>
+      <button class="btn btn-secondary" onclick="syncFromDrive()">↻ Refresh</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="view" id="view-progress">
+    <div class="page-header"><div class="eyebrow">Route tracker</div><h2>Progress & Statistics</h2></div>
+    <div id="progressContent"></div>
+  </div>
+
+</main>
+
+<!-- DRIVE MODAL -->
+<div class="modal-overlay" id="driveModal" onclick="closeModalOnBackdrop(event,'driveModal')">
+  <div class="modal-card">
+    <div class="modal-header"><h3>Google Drive — Cloud Backup & Sharing</h3><button class="modal-close" onclick="closeDriveModal()">✕</button></div>
+    <div class="modal-body">
+      <p style="font-size:.88rem;color:var(--slate);margin-bottom:18px;line-height:1.6">Walk data and photos are stored in Google Drive. Each walk gets its own photo subfolder. Share the root folder with co-contributors.</p>
+      <div class="setup-step"><div class="step-num">1</div><div class="step-text"><h4>Create a folder in Google Drive</h4><p>Go to <a href="https://drive.google.com" target="_blank" style="color:var(--blue)">drive.google.com</a>, create "SWCP Walk Journal" and share it with contributors.</p></div></div>
+      <div class="setup-step"><div class="step-num">2</div><div class="step-text"><h4>Copy the Folder ID from the URL</h4><p>Open the folder. URL: <code style="background:var(--sand);padding:1px 5px;border-radius:3px;font-size:.78rem">drive.google.com/drive/folders/<strong>FOLDER_ID</strong></code></p><input type="text" class="folder-id-input" id="folderIdInput" placeholder="Paste folder ID here…"></div></div>
+      <div class="setup-step"><div class="step-num">3</div><div class="step-text"><h4>Subfolders for photos & maps</h4><p>Each walk creates a subfolder e.g. <code style="background:var(--sand);padding:1px 4px;border-radius:3px;font-size:.78rem">01-Minehead-to-Porlock-Weir</code>. GPX map images are stored there too.</p></div></div>
+      <div id="driveConnectStatus" style="font-family:var(--font-ui);font-size:.7rem;color:var(--slate-light);min-height:18px;margin-bottom:11px"></div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="connectDrive()">Connect Drive</button>
+        <button class="btn btn-secondary" onclick="closeDriveModal()">Cancel</button>
+        <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectDrive()" style="display:none">Disconnect</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-overlay" id="exportModal" onclick="closeModalOnBackdrop(event,'exportModal')">
+  <div class="modal-card">
+    <div class="modal-header"><h3>Export Walk Journal — PDF Book</h3><button class="modal-close" onclick="document.getElementById('exportModal').classList.remove('open')">✕</button></div>
+    <div class="modal-body">
+      <p style="font-size:.85rem;color:var(--slate);margin-bottom:14px">Full-resolution photos are fetched from Google Drive and embedded at correct aspect ratios. Good internet connection recommended.</p>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Book Title</label><input type="text" id="expTitle" value="South West Coast Path — My Walk Journal"></div>
+        <div class="field"><label>Author Name</label><input type="text" id="expAuthor" placeholder="Your name"></div>
+        <div class="field" style="grid-column:1/-1"><label>Introduction (optional)</label>
+          <textarea id="expIntro" rows="3" placeholder="A few words about your journey…" style="font-family:var(--font-body);font-size:.9rem;padding:8px 12px;border:1px solid var(--sand-deep);border-radius:var(--radius);background:var(--sand-light);resize:vertical;min-height:65px;width:100%"></textarea>
+        </div>
+        <div class="field"><label>Photos per row (layout)</label>
+          <select id="expPhotoCols" style="padding:8px 11px;font-family:var(--font-body);font-size:.93rem;background:var(--sand-light);border:1px solid var(--sand-deep);border-radius:var(--radius);appearance:none">
+            <option value="1">1 — Full width</option>
+            <option value="2" selected>2 — Two column</option>
+            <option value="3">3 — Three column</option>
+            <option value="auto">Auto — pack by aspect ratio</option>
+          </select>
+        </div>
+        <div class="field"><label>Map images</label>
+          <select id="expMaps" style="padding:8px 11px;font-family:var(--font-body);font-size:.93rem;background:var(--sand-light);border:1px solid var(--sand-deep);border-radius:var(--radius);appearance:none">
+            <option value="full">Full page width</option>
+            <option value="half" selected>Half page (beside metadata)</option>
+          </select>
+        </div>
+      </div>
+      <div id="exportLog" class="export-log" style="display:none"></div>
+      <div class="form-actions" style="margin-top:14px">
+        <button class="btn btn-copper" id="exportBtn" onclick="exportPDF()">Generate PDF Book</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('exportModal').classList.remove('open')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightboxImg" src="" alt="">
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// =====================================================
+//  STATE
+// =====================================================
+let walks=[], currentPhotos=[], currentPeople=[], currentTags=[];
+let editingId=null, driveConfig=null, isSyncing=false;
+let currentGpx=null; // {points:[{lat,lon,ele}], dataUrl(png), driveFileId, name}
+let leafletMap=null;
+
+// =====================================================
+//  PERSISTENCE
+// =====================================================
+function loadLocal(){try{walks=JSON.parse(localStorage.getItem('swcp_walks')||'[]')}catch(e){walks=[]}try{driveConfig=JSON.parse(localStorage.getItem('swcp_drive')||'null')}catch(e){driveConfig=null}}
+function saveLocal(){localStorage.setItem('swcp_walks',JSON.stringify(walks))}
+function saveDriveConfig(){localStorage.setItem('swcp_drive',JSON.stringify(driveConfig))}
+
+// =====================================================
+//  DRIVE MCP HELPERS
+// =====================================================
+async function driveCall(system,user,maxTokens=4000){
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:maxTokens,system,messages:[{role:'user',content:user}],mcp_servers:[{type:'url',url:'https://drivemcp.googleapis.com/mcp/v1',name:'gdrive'}]})});
+  if(!r.ok) throw new Error('API '+r.status);
+  const d=await r.json();
+  const text=d.content.filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+  const results=d.content.filter(b=>b.type==='mcp_tool_result');
+  return{text,results};
+}
+function parseJ(text,results=[]){
+  const t=s=>{try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){return null}};
+  let r=t(text);if(r)return r;
+  for(const res of results){r=t(res.content?.[0]?.text||'');if(r)return r;}
+  return null;
+}
+async function driveListFolder(id){const{text,results}=await driveCall('List files in a Drive folder. Respond ONLY with JSON {"files":[{"id":"...","name":"...","mimeType":"..."}]}',`List all files in folder ID: ${id}`);return parseJ(text,results)||{files:[]}}
+async function driveReadFileText(id){const{text,results}=await driveCall('Return the full content of the requested Drive file as plain text.',`Read full content of file ID: ${id}`,8000);for(const r of results){const t=r.content?.[0]?.text||'';if(t.startsWith('[')||t.startsWith('{'))return t;}return text}
+async function driveWriteJSON(folderId,fileId,name,content){const action=fileId?`Update Drive file ID "${fileId}" with this content`:`Create plain-text file "${name}" in Drive folder "${folderId}" with this content`;const{text,results}=await driveCall('You are a Drive file writer. Respond ONLY with JSON {"success":true,"fileId":"..."}',`${action}:\n\n${content}`);return parseJ(text,results)||{success:true}}
+async function driveCreateFolder(parentId,name){const{text,results}=await driveCall('Create a subfolder in Drive. Respond ONLY with JSON {"success":true,"folderId":"..."}',`Create subfolder "${name}" inside Drive folder "${parentId}"`);return parseJ(text,results)||{success:false}}
+async function driveUploadBase64(parentFolderId,filename,base64data,mimeType){
+  const b64=base64data.includes(',')?base64data.split(',')[1]:base64data;
+  const{text,results}=await driveCall(
+    'Upload a base64-encoded file to Drive. Respond ONLY with JSON {"success":true,"fileId":"...","viewUrl":"https://drive.google.com/file/d/ID/view"}',
+    `Upload file to folder "${parentFolderId}". Filename: "${filename}". MIME: "${mimeType}". Base64 (first 100 chars): ${b64.substring(0,100)}...`,1000);
+  const p=parseJ(text,results);
+  if(p&&p.fileId)return{success:true,fileId:p.fileId,viewUrl:p.viewUrl||`https://drive.google.com/file/d/${p.fileId}/view`};
+  return{success:false};
+}
+
+// Fetch an image from Drive as dataUrl for PDF embedding
+async function driveGetImageDataUrl(fileId){
+  try{
+    // Use Drive export/download URL with CORS proxy approach via fetch
+    const url=`https://drive.google.com/uc?export=download&id=${fileId}`;
+    const r=await fetch(url,{mode:'cors'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const blob=await r.blob();
+    return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob);});
+  }catch(e){
+    // Fallback: try thumbnail URL
+    try{
+      const url2=`https://drive.google.com/thumbnail?id=${fileId}&sz=w2000`;
+      const r2=await fetch(url2,{mode:'cors'});
+      if(!r2.ok) throw new Error();
+      const blob2=await r2.blob();
+      return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob2);});
+    }catch(e2){return null;}
+  }
+}
+
+// =====================================================
+//  DRIVE CONNECT/SYNC
+// =====================================================
+async function connectDrive(){
+  const folderId=document.getElementById('folderIdInput').value.trim();
+  if(!folderId){showDriveStatus('Please enter a folder ID');return;}
+  showDriveStatus('Connecting…');setDriveBadge('syncing','Connecting…');
+  try{
+    const listing=await driveListFolder(folderId);
+    const files=listing.files||[];
+    const df=files.find(f=>f.name==='swcp-walks.json');
+    let dataFileId=df?df.id:null;
+    driveConfig={folderId,dataFileId};
+    if(df){showDriveStatus('Loading existing data…');const c=await driveReadFileText(df.id);try{const l=JSON.parse(c);if(Array.isArray(l)){const ex=new Set(l.map(w=>w.id));walks=[...l,...walks.filter(w=>!ex.has(w.id))];saveLocal();}}catch(e){}}
+    else{showDriveStatus('Creating data file…');const res=await driveWriteJSON(folderId,null,'swcp-walks.json',JSON.stringify(walks,null,2));if(res.fileId)driveConfig.dataFileId=res.fileId;}
+    saveDriveConfig();setDriveBadge('connected','Drive connected');
+    showDriveStatus('✓ Connected! '+walks.length+' walk(s).');
+    document.getElementById('disconnectBtn').style.display='inline-flex';
+    updateStats();renderHome();showToast('Google Drive connected','success');closeDriveModal();
+  }catch(e){showDriveStatus('Failed: '+e.message);setDriveBadge('disconnected','Drive — failed');showToast('Drive connection failed','error');}
+}
+async function syncToDrive(){
+  if(!driveConfig||isSyncing)return;isSyncing=true;setDriveBadge('syncing','Saving…');
+  try{const res=await driveWriteJSON(driveConfig.folderId,driveConfig.dataFileId,'swcp-walks.json',JSON.stringify(walks,null,2));if(res.fileId&&!driveConfig.dataFileId){driveConfig.dataFileId=res.fileId;saveDriveConfig();}setDriveBadge('connected','Drive — saved ✓');}
+  catch(e){setDriveBadge('connected','Drive — sync error');showToast('Drive sync failed','error');}
+  isSyncing=false;
+}
+async function syncFromDrive(){
+  if(!driveConfig){openDriveModal();return;}
+  setDriveBadge('syncing','Loading…');showToast('Refreshing from Drive…');
+  try{const listing=await driveListFolder(driveConfig.folderId);const df=(listing.files||[]).find(f=>f.name==='swcp-walks.json');if(df){const c=await driveReadFileText(df.id);const l=JSON.parse(c);if(Array.isArray(l)){walks=l;saveLocal();updateStats();renderHistory();renderHome();showToast(walks.length+' walks loaded','success');}}setDriveBadge('connected','Drive connected');}
+  catch(e){showToast('Refresh failed: '+e.message,'error');setDriveBadge('connected','Drive — error');}
+}
+function disconnectDrive(){if(!confirm('Disconnect Drive?'))return;driveConfig=null;localStorage.removeItem('swcp_drive');setDriveBadge('disconnected','Google Drive — not connected');document.getElementById('disconnectBtn').style.display='none';closeDriveModal();showToast('Drive disconnected');}
+
+// Upload photos to a walk subfolder
+function walkFolderName(num,title){return String(num).padStart(2,'0')+'-'+(title||'walk').replace(/[^a-zA-Z0-9\s]/g,'').replace(/\s+/g,'-').substring(0,40);}
+
+async function ensureWalkSubfolder(walkNum,walkTitle){
+  const name=walkFolderName(walkNum,walkTitle);
+  const listing=await driveListFolder(driveConfig.folderId);
+  const existing=(listing.files||[]).find(f=>f.name===name&&f.mimeType==='application/vnd.google-apps.folder');
+  if(existing)return existing.id;
+  const created=await driveCreateFolder(driveConfig.folderId,name);
+  return created.folderId||null;
+}
+
+async function uploadPhotosToDrive(walkNum,walkTitle){
+  if(!driveConfig)return;
+  const local=currentPhotos.filter(p=>p.status==='local'&&p.dataUrl);
+  if(!local.length)return;
+  let subFolderId=null;
+  try{subFolderId=await ensureWalkSubfolder(walkNum,walkTitle);}catch(e){console.warn('subfolder failed',e);return;}
+  if(!subFolderId)return;
+  const folderName=walkFolderName(walkNum,walkTitle);
+  for(let i=0;i<local.length;i++){
+    const photo=local[i];
+    const idx=currentPhotos.findIndex(p=>p.id===photo.id);
+    if(idx>=0){currentPhotos[idx].status='uploading';renderPhotos();}
+    const ext=(photo.name||'').split('.').pop().toLowerCase()||'jpg';
+    const mime=photo.dataUrl.startsWith('data:image/png')?'image/png':'image/jpeg';
+    const fname=`${folderName}_photo_${String(i+1).padStart(3,'0')}.${ext}`;
+    try{
+      const res=await driveUploadBase64(subFolderId,fname,photo.dataUrl,mime);
+      if(res.success&&res.fileId&&idx>=0){
+        currentPhotos[idx].driveFileId=res.fileId;
+        currentPhotos[idx].driveViewUrl=res.viewUrl;
+        currentPhotos[idx].driveFolderId=subFolderId;
+        currentPhotos[idx].status='drive';
+        currentPhotos[idx].dataUrl=null; // free memory
+      }
+    }catch(e){console.warn('photo upload failed',e);if(idx>=0)currentPhotos[idx].status='local';}
+    renderPhotos();
+  }
+}
+
+// =====================================================
+//  GPX HANDLING
+// =====================================================
+function switchMediaTab(name,el){
+  document.querySelectorAll('.media-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.media-panel').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+}
+
+function handleGpxInput(input){if(input.files[0])loadGpxFile(input.files[0]);}
+function handleGpxDrop(e){e.preventDefault();document.getElementById('gpxDrop').classList.remove('drag-over');if(e.dataTransfer.files[0])loadGpxFile(e.dataTransfer.files[0]);}
+
+function parseGpx(xmlStr){
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(xmlStr,'application/xml');
+  const pts=[];
+  // Try trkpt first, then rtept, then wpt
+  const nodes=[...doc.querySelectorAll('trkpt'),...doc.querySelectorAll('rtept')];
+  if(!nodes.length)[...doc.querySelectorAll('wpt')].forEach(n=>nodes.push(n));
+  nodes.forEach(n=>{
+    const lat=parseFloat(n.getAttribute('lat'));
+    const lon=parseFloat(n.getAttribute('lon'));
+    const eleEl=n.querySelector('ele');
+    const ele=eleEl?parseFloat(eleEl.textContent):0;
+    if(!isNaN(lat)&&!isNaN(lon))pts.push({lat,lon,ele});
+  });
+  return pts;
+}
+
+function gpxStats(pts){
+  if(!pts.length)return{};
+  let dist=0,gain=0,loss=0;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1],b=pts[i];
+    const R=6371000;
+    const dLat=(b.lat-a.lat)*Math.PI/180;
+    const dLon=(b.lon-a.lon)*Math.PI/180;
+    const s=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+    dist+=R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
+    const dEle=b.ele-a.ele;
+    if(dEle>0)gain+=dEle;else loss+=Math.abs(dEle);
+  }
+  return{distKm:(dist/1000).toFixed(2),gainM:Math.round(gain),lossM:Math.round(loss)};
+}
+
+async function loadGpxFile(file){
+  const text=await file.text();
+  const pts=parseGpx(text);
+  if(!pts.length){showGpxStatus('No track points found in GPX file','err');return;}
+  currentGpx={points:pts,name:file.name,dataUrl:null,driveFileId:null};
+  // Show stats
+  const stats=gpxStats(pts);
+  document.getElementById('gpxMeta').innerHTML=
+    `<div class="gpx-meta-item">📏 <strong>${stats.distKm} km</strong></div>`+
+    `<div class="gpx-meta-item">⛰ <strong>+${stats.gainM}m</strong> / -${stats.lossM}m</div>`+
+    `<div class="gpx-meta-item">📍 <strong>${pts.length}</strong> track points</div>`;
+  // Auto-fill distance/elevation if empty
+  if(!document.getElementById('fDistance').value&&stats.distKm)document.getElementById('fDistance').value=stats.distKm;
+  if(!document.getElementById('fElevation').value&&stats.gainM)document.getElementById('fElevation').value=stats.gainM;
+  // Render map
+  await renderGpxMap(pts);
+}
+
+async function renderGpxMap(pts){
+  showGpxStatus('Rendering map…','uploading');
+  const preview=document.getElementById('gpxMapPreview');
+  preview.style.display='block';
+  // Destroy old map
+  if(leafletMap){leafletMap.remove();leafletMap=null;}
+  // Create map in preview div
+  leafletMap=L.map(preview,{zoomControl:true,attributionControl:true});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap contributors',maxZoom:18
+  }).addTo(leafletMap);
+  // Add route polyline
+  const latlngs=pts.map(p=>[p.lat,p.lon]);
+  const poly=L.polyline(latlngs,{color:'#1a3a5c',weight:3.5,opacity:.9}).addTo(leafletMap);
+  // Start/end markers
+  if(pts.length){
+    const s=pts[0],e=pts[pts.length-1];
+    const startIcon=L.divIcon({html:'<div style="width:12px;height:12px;background:#2d6a4f;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>',iconSize:[12,12],iconAnchor:[6,6]});
+    const endIcon=L.divIcon({html:'<div style="width:12px;height:12px;background:#b5603a;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>',iconSize:[12,12],iconAnchor:[6,6]});
+    L.marker([s.lat,s.lon],{icon:startIcon}).addTo(leafletMap);
+    L.marker([e.lat,e.lon],{icon:endIcon}).addTo(leafletMap);
+  }
+  leafletMap.fitBounds(poly.getBounds(),{padding:[20,20]});
+  // Give tiles time to load, then capture
+  setTimeout(()=>captureMapToCanvas(),1800);
+}
+
+function captureMapToCanvas(){
+  // Use Leaflet's canvas renderer approach — draw onto a canvas manually
+  const preview=document.getElementById('gpxMapPreview');
+  const canvas=document.createElement('canvas');
+  canvas.width=preview.clientWidth*2;  // 2x for quality
+  canvas.height=preview.clientHeight*2;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(2,2);
+  ctx.fillStyle='#f0f4f8';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  // Draw tiles from the map
+  const mapContainer=preview;
+  const tiles=mapContainer.querySelectorAll('.leaflet-tile');
+  const promises=[];
+  tiles.forEach(tile=>{
+    if(tile.src&&tile.complete){
+      const p=new Promise(res=>{
+        const img=new Image();
+        img.crossOrigin='anonymous';
+        img.onload=()=>{
+          try{
+            const r=tile.getBoundingClientRect();
+            const mr=mapContainer.getBoundingClientRect();
+            ctx.drawImage(img,r.left-mr.left,r.top-mr.top,r.width,r.height);
+          }catch(e){}
+          res();
+        };
+        img.onerror=()=>res();
+        img.src=tile.src;
+      });
+      promises.push(p);
+    }
+  });
+  Promise.all(promises).then(()=>{
+    // Draw the route polyline on top
+    if(currentGpx&&currentGpx.points){
+      const map=leafletMap;
+      const pts=currentGpx.points;
+      ctx.strokeStyle='#1a3a5c';
+      ctx.lineWidth=3;
+      ctx.lineJoin='round';
+      ctx.lineCap='round';
+      ctx.beginPath();
+      pts.forEach((p,i)=>{
+        const cp=map.latLngToContainerPoint([p.lat,p.lon]);
+        if(i===0)ctx.moveTo(cp.x,cp.y);else ctx.lineTo(cp.x,cp.y);
+      });
+      ctx.stroke();
+      // Start dot (green)
+      const sp=map.latLngToContainerPoint([pts[0].lat,pts[0].lon]);
+      ctx.fillStyle='#2d6a4f';ctx.beginPath();ctx.arc(sp.x,sp.y,5,0,2*Math.PI);ctx.fill();
+      ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+      // End dot (copper)
+      const ep=map.latLngToContainerPoint([pts[pts.length-1].lat,pts[pts.length-1].lon]);
+      ctx.fillStyle='#b5603a';ctx.beginPath();ctx.arc(ep.x,ep.y,5,0,2*Math.PI);ctx.fill();
+      ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+      // Scale bar
+      drawScaleBar(ctx,map,canvas.width/2,canvas.height/2);
+    }
+    const dataUrl=canvas.toDataURL('image/png');
+    if(currentGpx)currentGpx.dataUrl=dataUrl;
+    showGpxStatus('Map captured — will be uploaded to Drive when you save','ok');
+  });
+}
+
+function drawScaleBar(ctx,map,w,h){
+  // Calculate a round distance for scale bar
+  const p1=map.containerPointToLatLng([w/2-50,h-30]);
+  const p2=map.containerPointToLatLng([w/2+50,h-30]);
+  const R=6371000,dLon=(p2.lng-p1.lng)*Math.PI/180;
+  const dist=R*Math.abs(dLon)*Math.cos(p1.lat*Math.PI/180);
+  const roundDist=Math.pow(10,Math.floor(Math.log10(dist)));
+  const barPx=100*(roundDist/dist);
+  const x=w/2-barPx/2,y=h-20;
+  ctx.fillStyle='rgba(255,255,255,.8)';
+  ctx.fillRect(x-4,y-12,barPx+8,18);
+  ctx.fillStyle='#1a3a5c';
+  ctx.fillRect(x,y-2,barPx,4);
+  ctx.font='bold 11px Montserrat,sans-serif';
+  ctx.fillStyle='#1a3a5c';
+  ctx.textAlign='center';
+  ctx.fillText(roundDist>=1000?`${roundDist/1000}km`:`${Math.round(roundDist)}m`,x+barPx/2,y-6);
+}
+
+function showGpxStatus(msg,type){
+  const el=document.getElementById('gpxStatus');
+  el.textContent=msg;el.style.display='block';el.className='gpx-status '+type;
+}
+
+async function uploadGpxMap(walkNum,walkTitle,subFolderId){
+  if(!currentGpx||!currentGpx.dataUrl||!subFolderId)return null;
+  const fname=walkFolderName(walkNum,walkTitle)+'_route-map.png';
+  try{
+    const res=await driveUploadBase64(subFolderId,fname,currentGpx.dataUrl,'image/png');
+    if(res.success&&res.fileId){
+      currentGpx.driveFileId=res.fileId;
+      currentGpx.driveViewUrl=res.viewUrl;
+      return{fileId:res.fileId,viewUrl:res.viewUrl,filename:fname};
+    }
+  }catch(e){console.warn('GPX map upload failed',e);}
+  return null;
+}
+
+// =====================================================
+//  NAVIGATION
+// =====================================================
+function showView(id,navEl){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('view-'+id)?.classList.add('active');
+  if(navEl)navEl.classList.add('active');
+  else document.querySelector(`[data-view="${id}"]`)?.classList.add('active');
+  if(id==='home')renderHome();
+  if(id==='history')renderHistory();
+  if(id==='progress')renderProgress();
+  document.getElementById('sidebar').classList.remove('open');
+}
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open')}
+function openDriveModal(){document.getElementById('driveModal').classList.add('open');if(driveConfig){document.getElementById('folderIdInput').value=driveConfig.folderId||'';document.getElementById('disconnectBtn').style.display='inline-flex';showDriveStatus('Currently connected.');}else{document.getElementById('disconnectBtn').style.display='none';showDriveStatus('');}}
+function closeDriveModal(){document.getElementById('driveModal').classList.remove('open')}
+function closeModalOnBackdrop(e,id){if(e.target===document.getElementById(id))document.getElementById(id).classList.remove('open')}
+function setDriveBadge(state,text){const b=document.getElementById('driveStatusBadge');b.className='drive-status '+state;document.getElementById('driveStatusText').textContent=text;const w=document.getElementById('driveWarning');if(w)w.style.display=(state==='disconnected'?'block':'none')}
+function showDriveStatus(msg){document.getElementById('driveConnectStatus').textContent=msg}
+
+// =====================================================
+//  FORM HELPERS
+// =====================================================
+function setDifficulty(val){document.getElementById('fDifficulty').value=val;document.querySelectorAll('#difficultyStars .star').forEach((s,i)=>s.classList.toggle('active',i<val))}
+function addTag(e){if(e.key!=='Enter')return;e.preventDefault();const inp=document.getElementById('tagInput');const v=inp.value.trim();if(v&&!currentTags.includes(v)){currentTags.push(v);renderTagsUI();}inp.value='';}
+function removeTag(idx){currentTags.splice(idx,1);renderTagsUI()}
+function renderTagsUI(){
+  const wrap=document.getElementById('tagsWrap'),inp=document.getElementById('tagInput');
+  wrap.querySelectorAll('.tag').forEach(t=>t.remove());
+  currentTags.forEach((tag,i)=>{const s=document.createElement('span');s.className='tag'+(tag.toLowerCase().includes('favour')||tag.toLowerCase().includes('favor')?' favourite':'');s.innerHTML=`${esc(tag)} <button class="tag-remove" onclick="removeTag(${i})" type="button">✕</button>`;wrap.insertBefore(s,inp);});
+}
+function getCheckedByName(p,n){const v=[];for(let i=1;i<=n;i++){const el=document.getElementById(p+i);if(el&&el.checked)v.push(el.value);}return v}
+
+// =====================================================
+//  PEOPLE
+// =====================================================
+function addPerson(){const n=document.getElementById('personNameInput').value.trim(),r=document.getElementById('personRoleInput').value;if(!n)return;currentPeople.push({name:n,role:r});renderPeopleUI();document.getElementById('personNameInput').value='';}
+function removePerson(idx){currentPeople.splice(idx,1);renderPeopleUI()}
+function renderPeopleUI(){
+  document.getElementById('personList').innerHTML=currentPeople.map((p,i)=>{
+    const icon=p.role==='dog'?'🐕':p.role==='cat'?'🐈':p.role==='other pet'?'🐾':p.role==='guide'?'🧭':p.role==='met on path'?'👋':'🚶';
+    return`<div class="person-chip"><span>${icon}</span><span class="person-name">${esc(p.name)}</span><span class="person-role">${esc(p.role)}</span><button class="remove-person" type="button" onclick="removePerson(${i})">✕</button></div>`;
+  }).join('');
+}
+
+// =====================================================
+//  PHOTOS
+// =====================================================
+function handlePhotoInput(input){processFiles(input.files)}
+function handlePhotoDrop(e){e.preventDefault();document.getElementById('photoDrop').classList.remove('drag-over');processFiles(e.dataTransfer.files)}
+function processFiles(files){
+  Array.from(files).forEach(file=>{
+    if(!file.type.startsWith('image/'))return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      // Get natural dimensions from image
+      const img=new Image();
+      img.onload=()=>{
+        currentPhotos.push({id:uid(),name:file.name,dataUrl:ev.target.result,w:img.naturalWidth,h:img.naturalHeight,driveFileId:null,driveViewUrl:null,status:'local'});
+        renderPhotos();
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function removePhoto(idx){currentPhotos.splice(idx,1);renderPhotos()}
+function renderPhotos(){
+  const grid=document.getElementById('photoGrid');
+  grid.innerHTML='';
+  currentPhotos.forEach((p,i)=>{
+    const div=document.createElement('div');div.className='photo-thumb';
+    const src=p.dataUrl||(p.driveFileId?`https://drive.google.com/thumbnail?id=${p.driveFileId}&sz=w300`:'');
+    const statusLabel=p.status==='drive'?'Drive':p.status==='uploading'?'Uploading…':'Local';
+    div.innerHTML=`${src?`<img src="${src}" alt="photo">`:'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--slate-light);font-size:.7rem;font-family:var(--font-ui)">📷</div>'}
+      <div class="photo-overlay">
+        ${p.dataUrl?`<button class="photo-overlay-btn" onclick="openLightbox('${p.dataUrl}')">View</button>`:''}
+        ${p.driveViewUrl?`<a class="photo-overlay-btn" href="${p.driveViewUrl}" target="_blank">Drive</a>`:''}
+        <button class="photo-overlay-btn" onclick="removePhoto(${i})" style="color:#ffaaaa">Remove</button>
+      </div>`;
+    const badge=document.createElement('div');
+    badge.style.cssText='position:absolute;bottom:3px;left:3px;display:flex;align-items:center;gap:3px';
+    badge.innerHTML=`<span class="photo-status-dot ${p.status}" title="${statusLabel}"></span>`;
+    div.appendChild(badge);
+    grid.appendChild(div);
+  });
+}
+
+// =====================================================
+//  SAVE WALK
+// =====================================================
+async function saveWalk(e){
+  e.preventDefault();
+  const btn=document.getElementById('saveBtn');
+  btn.disabled=true;btn.textContent='Saving…';
+  const startTime=document.getElementById('fStartTime').value;
+  const finishTime=document.getElementById('fFinishTime').value;
+  let walkTime=parseFloat(document.getElementById('fWalkTime').value)||0;
+  if(!walkTime&&startTime&&finishTime){const[sh,sm]=startTime.split(':').map(Number);const[fh,fm]=finishTime.split(':').map(Number);walkTime=Math.max(0,((fh*60+fm)-(sh*60+sm))/60);}
+  const walkNumber=editingId?walks.findIndex(w=>w.id===editingId)+1:walks.length+1;
+  const title=document.getElementById('fTitle').value;
+
+  // Upload photos to Drive
+  if(driveConfig&&currentPhotos.some(p=>p.status==='local'&&p.dataUrl)){
+    btn.textContent='Uploading photos…';
+    await uploadPhotosToDrive(walkNumber,title);
+  }
+
+  // Upload GPX map image to Drive
+  let gpxRecord=null;
+  if(driveConfig&&currentGpx&&currentGpx.dataUrl&&!currentGpx.driveFileId){
+    btn.textContent='Uploading route map…';
+    try{
+      const subId=await ensureWalkSubfolder(walkNumber,title);
+      if(subId){const mapRef=await uploadGpxMap(walkNumber,title,subId);if(mapRef)gpxRecord=mapRef;}
+    }catch(e){console.warn('GPX upload failed',e);}
+  }else if(currentGpx&&currentGpx.driveFileId){
+    gpxRecord={fileId:currentGpx.driveFileId,viewUrl:currentGpx.driveViewUrl};
+  }
+
+  const savedPhotos=currentPhotos.map(p=>({id:p.id,name:p.name,w:p.w||null,h:p.h||null,driveFileId:p.driveFileId||null,driveViewUrl:p.driveViewUrl||null,status:p.status}));
+
+  const walk={
+    id:editingId||uid(),date:document.getElementById('fDate').value,title,
+    start:document.getElementById('fStart').value,finish:document.getElementById('fFinish').value,
+    startTime,finishTime,
+    distance:parseFloat(document.getElementById('fDistance').value)||0,
+    elevation:parseInt(document.getElementById('fElevation').value)||0,
+    walkTime:parseFloat(walkTime.toFixed(2)),
+    weather:getCheckedByName('w',6),ground:getCheckedByName('g',5),terrain:getCheckedByName('t',6),
+    temperature:parseInt(document.getElementById('fTemp').value),
+    visibility:document.getElementById('fVisibility').value,tide:document.getElementById('fTide').value,
+    difficulty:parseInt(document.getElementById('fDifficulty').value),
+    facilities:getCheckedByName('f',4),wildlife:document.getElementById('fWildlife').value,
+    people:[...currentPeople],groupNotes:document.getElementById('fGroupNotes').value,
+    reflections:document.getElementById('fReflections').value,tips:document.getElementById('fTips').value,
+    photosLink:document.getElementById('fPhotosLink').value,
+    tags:[...currentTags],photos:savedPhotos,gpxMap:gpxRecord,
+    walkNumber,createdAt:new Date().toISOString()
+  };
+
+  if(editingId){const idx=walks.findIndex(w=>w.id===editingId);if(idx>-1)walks[idx]=walk;else walks.push(walk);editingId=null;}
+  else walks.push(walk);
+  saveLocal();updateStats();
+
+  if(driveConfig){btn.textContent='Syncing…';try{await syncToDrive();showToast('Walk saved & backed up to Drive','success');}catch(e){showToast('Walk saved locally — Drive sync failed','error');}}
+  else showToast('Walk saved locally');
+
+  resetForm();btn.disabled=false;btn.textContent='Save Walk Entry';showView('history');
+}
+
+function resetForm(){
+  document.getElementById('walkForm').reset();
+  currentPhotos=[];currentPeople=[];currentTags=[];currentGpx=null;editingId=null;
+  renderPhotos();renderPeopleUI();renderTagsUI();setDifficulty(0);
+  document.getElementById('tempVal').textContent='15°C';
+  document.querySelectorAll('#walkForm .checkbox-pill input').forEach(cb=>cb.checked=false);
+  document.getElementById('fDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('logFormTitle').textContent='Log a Walk';
+  document.getElementById('gpxMapPreview').style.display='none';
+  document.getElementById('gpxMeta').innerHTML='';
+  document.getElementById('gpxStatus').style.display='none';
+  if(leafletMap){leafletMap.remove();leafletMap=null;}
+}
+
+function editWalk(id){
+  const w=walks.find(x=>x.id===id);if(!w)return;
+  editingId=id;showView('log');
+  document.getElementById('logFormTitle').textContent='Edit Walk';
+  document.getElementById('fDate').value=w.date;document.getElementById('fTitle').value=w.title;
+  document.getElementById('fStart').value=w.start;document.getElementById('fFinish').value=w.finish;
+  document.getElementById('fStartTime').value=w.startTime||'';document.getElementById('fFinishTime').value=w.finishTime||'';
+  document.getElementById('fDistance').value=w.distance;document.getElementById('fElevation').value=w.elevation;
+  document.getElementById('fWalkTime').value=w.walkTime;document.getElementById('fTemp').value=w.temperature||15;
+  document.getElementById('tempVal').textContent=(w.temperature||15)+'°C';
+  document.getElementById('fVisibility').value=w.visibility||'';document.getElementById('fTide').value=w.tide||'';
+  document.getElementById('fWildlife').value=w.wildlife||'';document.getElementById('fGroupNotes').value=w.groupNotes||'';
+  document.getElementById('fReflections').value=w.reflections||'';document.getElementById('fTips').value=w.tips||'';
+  document.getElementById('fPhotosLink').value=w.photosLink||'';
+  setDifficulty(w.difficulty||0);
+  const maps={w:[w.weather,6],g:[w.ground,5],t:[w.terrain,6],f:[w.facilities,4]};
+  Object.entries(maps).forEach(([p,[vals,n]])=>{for(let i=1;i<=n;i++){const el=document.getElementById(p+i);if(el)el.checked=(vals||[]).includes(el.value);}});
+  currentTags=[...(w.tags||[])];currentPeople=[...(w.people||[])];
+  currentPhotos=(w.photos||[]).map(p=>({...p,dataUrl:null}));
+  renderTagsUI();renderPeopleUI();renderPhotos();
+}
+
+async function deleteWalk(id){
+  if(!confirm('Delete this walk permanently?'))return;
+  walks=walks.filter(w=>w.id!==id);saveLocal();
+  if(driveConfig)try{await syncToDrive();}catch(e){}
+  updateStats();renderHistory();showToast('Walk deleted');
+}
+
+// =====================================================
+//  STATS
+// =====================================================
+function getTotalKm(){return walks.reduce((a,w)=>a+(w.distance||0),0)}
+function getTotalElev(){return walks.reduce((a,w)=>a+(w.elevation||0),0)}
+function getTotalHours(){return walks.reduce((a,w)=>a+(w.walkTime||0),0)}
+function updateStats(){
+  const km=getTotalKm(),pct=Math.min(100,km/630*100).toFixed(1);
+  const st=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  st('statKm',km.toFixed(1));st('statWalks',walks.length);st('statElev',Math.round(getTotalElev()).toLocaleString());
+  st('statHours',getTotalHours().toFixed(1));st('statRemain',Math.max(0,630-km).toFixed(1));
+  st('masterPct',pct+'%');st('sidebarPct',pct+'%');st('sidebarDetail',km.toFixed(1)+' km of 630 km');
+  document.getElementById('masterBarFill')?.style.setProperty('width',pct+'%');
+  document.getElementById('sidebarFill')?.style.setProperty('width',pct+'%');
+}
+
+// =====================================================
+//  RENDER VIEWS
+// =====================================================
+function renderHome(){
+  updateStats();
+  const feed=document.getElementById('recentFeed');
+  const recent=[...walks].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  if(!recent.length){feed.innerHTML=`<div class="empty-state"><div class="empty-icon">🌊</div><h3>No walks yet</h3><p>${driveConfig?'Drive connected — log your first walk.':'Connect Drive then log your first walk.'}</p><button class="btn btn-primary" onclick="showView('log')">Log Your First Walk</button></div>`;return;}
+  feed.innerHTML=recent.map(w=>{
+    const d=new Date(w.date+'T12:00:00');
+    const tags=(w.tags||[]).slice(0,3).map(t=>`<span class="tag ${t.toLowerCase().includes('favour')||t.toLowerCase().includes('favor')?'favourite':''}">${esc(t)}</span>`).join('');
+    const people=(w.people||[]).slice(0,3).map(p=>p.name).join(', ');
+    return`<div class="walk-feed-item" onclick="showView('history')"><div class="walk-feed-date-block"><div class="walk-feed-day">${d.getDate()}</div><div class="walk-feed-month">${d.toLocaleString('en-GB',{month:'short'}).toUpperCase()}</div></div><div class="walk-feed-content"><div class="walk-feed-title">${esc(w.title)}</div><div class="walk-feed-meta"><span>📍 ${esc(w.start)} → ${esc(w.finish)}</span>${w.distance?`<span>📏 ${w.distance} km</span>`:''}${people?`<span>👥 ${esc(people)}</span>`:''}</div>${w.reflections?`<div class="walk-feed-excerpt">${esc(w.reflections)}</div>`:''}${tags?`<div class="walk-tags">${tags}</div>`:''}</div></div>`;
+  }).join('');
+}
+
+function renderHistory(){
+  const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
+  const sorted=[...walks].sort((a,b)=>b.date.localeCompare(a.date));
+  const filtered=sorted.filter(w=>!q||[w.title,w.start,w.finish,w.reflections||'',...(w.tags||[]),...(w.people||[]).map(p=>p.name)].join(' ').toLowerCase().includes(q));
+  const list=document.getElementById('historyList');
+  if(!filtered.length){list.innerHTML=`<div class="empty-state"><div class="empty-icon">🗺</div><h3>${q?'No matching walks':'No walks yet'}</h3><p>${q?'Try a different term.':'Use Log a Walk to start.'}</p>${!q?`<button class="btn btn-primary" onclick="showView('log')">Log a Walk</button>`:''}</div>`;return;}
+  list.innerHTML=filtered.map(w=>{
+    const d=new Date(w.date+'T12:00:00');
+    const diff=w.difficulty?'★'.repeat(w.difficulty)+'☆'.repeat(5-w.difficulty):'–';
+    const tags=(w.tags||[]).map(t=>`<span class="tag ${t.toLowerCase().includes('favour')||t.toLowerCase().includes('favor')?'favourite':''}">${esc(t)}</span>`).join('');
+    const peopleBadges=(w.people||[]).map(p=>{const icon=p.role==='dog'?'🐕':p.role==='cat'?'🐈':p.role==='other pet'?'🐾':p.role==='guide'?'🧭':p.role==='met on path'?'👋':'🚶';const cls=p.role==='dog'||p.role==='cat'||p.role==='other pet'?'pet':'walker';return`<span class="people-badge ${cls}">${icon} ${esc(p.name)}</span>`;}).join('');
+    const drivePhotos=(w.photos||[]).filter(p=>p.driveFileId);
+    const photoLinks=drivePhotos.map(p=>`<a class="drive-photo-chip" href="${p.driveViewUrl||'#'}" target="_blank">📷 ${esc(p.name||'Photo')}</a>`).join('');
+    const gpxLink=w.gpxMap?`<a class="drive-photo-chip" href="${w.gpxMap.viewUrl||'#'}" target="_blank">🗺 Route Map</a>`:'';
+    const metaItems=[
+      ['Date',d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})],
+      w.startTime?['Time',w.startTime+(w.finishTime?' – '+w.finishTime:'')]:null,
+      w.distance?['Distance',w.distance+' km']:null,w.elevation?['Elevation gain',w.elevation+' m']:null,
+      w.walkTime?['Walking time',w.walkTime+' hrs']:null,
+      w.difficulty?['Difficulty',`<span style="color:var(--copper);letter-spacing:2px">${diff}</span>`]:null,
+      (w.weather||[]).length?['Weather',esc((w.weather||[]).join(', '))]:null,
+      (w.ground||[]).length?['Ground',esc((w.ground||[]).join(', '))]:null,
+      (w.terrain||[]).length?['Terrain',esc((w.terrain||[]).join(', '))]:null,
+      w.temperature!=null?['Temperature',w.temperature+'°C']:null,
+      w.visibility?['Visibility',esc(w.visibility)]:null,w.tide?['Tide',esc(w.tide)]:null,
+      w.wildlife?['Wildlife & Flora',esc(w.wildlife),true]:null,
+    ].filter(Boolean);
+    return`<div class="walk-card" id="card-${w.id}"><div class="walk-card-header" onclick="toggleCard('${w.id}')"><div class="walk-feed-date-block"><div class="walk-feed-day">${d.getDate()}</div><div class="walk-feed-month">${d.toLocaleString('en-GB',{month:'short'}).toUpperCase()}</div></div><div style="flex:1"><div class="walk-feed-title">${esc(w.title)}</div><div class="walk-feed-meta"><span>${esc(w.start)} → ${esc(w.finish)}</span>${w.distance?`<span>📏 ${w.distance} km</span>`:''}${(w.people||[]).length?`<span>👥 ${(w.people||[]).length} companion${(w.people||[]).length>1?'s':''}</span>`:''}</div></div><span class="walk-card-expand">▼</span></div>
+    <div class="walk-card-body">
+      <div class="meta-grid">${metaItems.map(([k,v,full])=>`<div class="meta-item"${full?' style="grid-column:1/-1"':''}><div class="meta-key">${k}</div><div class="meta-val">${v}</div></div>`).join('')}</div>
+      ${peopleBadges?`<div style="margin-bottom:10px"><div class="meta-key" style="margin-bottom:5px">People & Pets</div><div class="people-display">${peopleBadges}</div>${w.groupNotes?`<div style="font-size:.88rem;color:var(--slate);font-style:italic;margin-top:4px">${esc(w.groupNotes)}</div>`:''}</div>`:''}
+      ${w.reflections?`<div class="reflections-display">${esc(w.reflections).replace(/\n/g,'<br>')}</div>`:''}
+      ${w.tips?`<div style="margin:11px 0;padding:12px 16px;background:var(--sand-light);border-radius:var(--radius);border:var(--rule-faint)"><div class="meta-key" style="margin-bottom:5px">Tips for future walkers</div><div style="font-size:.88rem;color:var(--slate)">${esc(w.tips).replace(/\n/g,'<br>')}</div></div>`:''}
+      ${tags?`<div class="walk-tags" style="margin:7px 0">${tags}</div>`:''}
+      ${(photoLinks||gpxLink)?`<div class="drive-photos-row">${gpxLink}${photoLinks}</div>`:''}
+      ${w.photosLink?`<div style="margin-top:8px"><a style="font-family:var(--font-ui);font-size:.68rem;color:var(--blue);text-decoration:none;border:1px solid var(--blue-light);padding:4px 10px;border-radius:var(--radius)" href="${esc(w.photosLink)}" target="_blank">📱 Google Photos Album</a></div>`:''}
+      <div class="card-actions"><button class="btn btn-secondary" onclick="editWalk('${w.id}')">✏ Edit</button><button class="btn btn-danger" onclick="deleteWalk('${w.id}')">✕ Delete</button>${driveConfig?`<a class="btn btn-secondary" href="https://drive.google.com/drive/folders/${driveConfig.folderId}" target="_blank">📁 Drive</a>`:''}</div>
+    </div></div>`;
+  }).join('');
+}
+function toggleCard(id){document.getElementById('card-'+id)?.classList.toggle('open')}
+
+function renderProgress(){
+  const km=getTotalKm(),pct=Math.min(100,km/630*100),n=walks.length;
+  const monthly={};
+  walks.forEach(w=>{const m=w.date.substr(0,7);monthly[m]=(monthly[m]||0)+(w.distance||0);});
+  const maxM=Math.max(1,...Object.values(monthly));
+  const monthRows=Object.entries(monthly).sort().map(([m,d])=>{const label=new Date(m+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'});return`<div class="month-bar-row"><div class="month-bar-label"><span class="month-bar-name">${label}</span><span class="month-bar-km">${d.toFixed(1)} km</span></div><div class="month-bar"><div class="month-bar-fill" style="width:${d/maxM*100}%"></div></div></div>`;}).join('');
+  const pc={};walks.forEach(w=>(w.people||[]).forEach(p=>{pc[p.name]=(pc[p.name]||0)+1;}));
+  const peopleRows=Object.entries(pc).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([name,count])=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:var(--rule-faint)"><span style="font-family:var(--font-body);font-size:.92rem">${esc(name)}</span><span style="font-family:var(--font-display);font-size:1rem;color:var(--blue)">${count} walk${count>1?'s':''}</span></div>`).join('');
+  document.getElementById('progressContent').innerHTML=`
+    <div class="form-section"><div class="form-section-title">Route Progress</div><div style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><span style="font-family:var(--font-display);font-size:1.1rem;color:var(--blue)">South West Coast Path</span><span style="font-family:var(--font-display);font-size:1.9rem;color:var(--copper)">${pct.toFixed(1)}%</span></div><div style="height:13px;background:var(--sand);border-radius:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--blue),var(--blue-light));border-radius:8px;transition:width .8s"></div></div><div style="display:flex;justify-content:space-between;margin-top:5px"><span style="font-family:var(--font-ui);font-size:.6rem;color:var(--slate-light)">Minehead</span><span style="font-family:var(--font-ui);font-size:.6rem;color:var(--slate-light)">${km.toFixed(1)} km walked</span><span style="font-family:var(--font-ui);font-size:.6rem;color:var(--slate-light)">Poole Harbour</span></div></div></div>
+    <div class="stats-grid"><div class="stat-card"><div class="stat-value">${km.toFixed(1)}</div><div class="stat-label">km walked</div></div><div class="stat-card copper-top"><div class="stat-value">${(630-km).toFixed(1)}</div><div class="stat-label">km remaining</div></div><div class="stat-card"><div class="stat-value">${n}</div><div class="stat-label">walks logged</div></div><div class="stat-card slate-top"><div class="stat-value">${Math.round(getTotalElev()).toLocaleString()}</div><div class="stat-label">m ascent</div></div><div class="stat-card"><div class="stat-value">${getTotalHours().toFixed(1)}</div><div class="stat-label">hrs on path</div></div><div class="stat-card copper-top"><div class="stat-value">${n?(km/n).toFixed(1):'–'}</div><div class="stat-label">km avg per walk</div></div></div>
+    ${monthRows?`<div class="form-section"><div class="form-section-title">Distance by Month</div>${monthRows}</div>`:''}
+    ${peopleRows?`<div class="form-section"><div class="form-section-title">Walking Companions</div>${peopleRows}</div>`:''}`;
+}
+
+// =====================================================
+//  PDF EXPORT — full-res photos, aspect-ratio layout
+// =====================================================
+function openExportModal(){document.getElementById('exportModal').classList.add('open');document.getElementById('exportLog').style.display='none';document.getElementById('exportLog').innerHTML='';}
+function logExport(msg,state){
+  const log=document.getElementById('exportLog');log.style.display='block';
+  const line=document.createElement('span');line.className='log-line '+(state||'');line.textContent=msg;
+  log.appendChild(line);log.appendChild(document.createElement('br'));log.scrollTop=log.scrollHeight;
+}
+
+// Load an image dataUrl and get its natural dimensions
+function loadImageDims(dataUrl){
+  return new Promise((res)=>{
+    const img=new Image();
+    img.onload=()=>res({dataUrl,w:img.naturalWidth,h:img.naturalHeight});
+    img.onerror=()=>res(null);
+    img.src=dataUrl;
+  });
+}
+
+// Layout algorithm: pack photos into rows respecting aspect ratios
+// targetRowH = target height in mm for each row; pageW = available width mm
+function layoutPhotos(photos, pageW, targetRowH, gap){
+  // photos: [{dataUrl, w, h}]
+  const rows=[];
+  let i=0;
+  while(i<photos.length){
+    // Try to fit as many as possible in this row at targetRowH
+    // Each photo at targetRowH has width = (w/h)*targetRowH
+    let rowPhotos=[];
+    let rowW=0;
+    while(i<photos.length){
+      const p=photos[i];
+      const ar=p.w/p.h;
+      const pw=ar*targetRowH;
+      if(rowPhotos.length>0&&rowW+gap+pw>pageW+0.1) break;
+      rowPhotos.push({...p,ar});
+      rowW+=(rowPhotos.length>1?gap:0)+pw;
+      i++;
+    }
+    // Scale the row to fill pageW
+    if(rowPhotos.length===0){i++;continue;}
+    const totalGaps=gap*(rowPhotos.length-1);
+    const availW=pageW-totalGaps;
+    const totalNaturalW=rowPhotos.reduce((s,p)=>s+p.ar*targetRowH,0);
+    const scale=Math.min(availW/totalNaturalW,1.5); // don't upscale too much
+    const rowH=targetRowH*scale;
+    let x=0;
+    rows.push(rowPhotos.map(p=>{
+      const pw=p.ar*targetRowH*scale;
+      const item={...p,x,y:0,pw,ph:rowH};
+      x+=pw+gap;
+      return item;
+    }));
+  }
+  return rows;
+}
+
+async function exportPDF(){
+  if(!walks.length){showToast('No walks to export','error');return;}
+  const btn=document.getElementById('exportBtn');btn.disabled=true;btn.textContent='Generating…';
+  document.getElementById('exportLog').innerHTML='';
+  const title=document.getElementById('expTitle').value||'SWCP Walk Journal';
+  const author=document.getElementById('expAuthor').value||'';
+  const intro=document.getElementById('expIntro').value||'';
+  const colMode=document.getElementById('expPhotoCols').value;
+  const mapMode=document.getElementById('expMaps').value;
+  const sorted=[...walks].sort((a,b)=>a.date.localeCompare(b.date));
+
+  logExport('Initialising PDF engine…');
+  try{
+    const{jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const BLUE=[26,58,92],COPPER=[181,96,58],SAND=[232,223,200],SLATE=[74,78,84],CHARCOAL=[44,44,44],SANDL=[245,240,228];
+    const W=210,H=297,ML=18,MR=18,MT=20,MB=22,CW=174;
+    let page=1;
+    function footer(){doc.setDrawColor(...BLUE);doc.setLineWidth(.3);doc.line(ML,H-12,W-MR,H-12);doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...SLATE);doc.text('South West Coast Path Walk Journal',ML,H-8);doc.text(''+page,W-MR,H-8,{align:'right'});}
+    function newPage(){doc.addPage();page++;footer();}
+
+    // ── TITLE PAGE ──
+    logExport('Title page…');
+    doc.setFillColor(...BLUE);doc.rect(0,0,W,88,'F');
+    doc.setDrawColor(...COPPER);doc.setLineWidth(1.5);doc.line(ML,93,W-MR,93);
+    doc.setFont('helvetica','bold');doc.setFontSize(24);doc.setTextColor(...SAND);doc.text(title,W/2,38,{align:'center',maxWidth:CW});
+    if(author){doc.setFontSize(12);doc.setFont('helvetica','normal');doc.setTextColor(200,190,168);doc.text(author,W/2,52,{align:'center'});}
+    // compass rose
+    const cx=W/2,cy=72;doc.setDrawColor(200,190,168);doc.setLineWidth(.5);doc.circle(cx,cy,5.5);
+    [[cx,cy-7.5,cx,cy+7.5],[cx-7.5,cy,cx+7.5,cy],[cx-5.3,cy-5.3,cx+5.3,cy+5.3],[cx-5.3,cy+5.3,cx+5.3,cy-5.3]].forEach(([x1,y1,x2,y2])=>doc.line(x1,y1,x2,y2));
+    doc.setFontSize(5);doc.setTextColor(200,190,168);doc.text('N',cx-.8,cy-9);doc.text('S',cx-.8,cy+11);doc.text('W',cx-12,cy+1);doc.text('E',cx+10.5,cy+1);
+    const km=getTotalKm();
+    doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(...CHARCOAL);doc.text(`${walks.length} walks · ${km.toFixed(1)} km · ${(km/630*100).toFixed(1)}% of route`,W/2,106,{align:'center'});
+    if(sorted.length){const fmt=d=>new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});doc.setFontSize(8.5);doc.setTextColor(...SLATE);doc.text(`${fmt(sorted[0].date)} — ${fmt(sorted[sorted.length-1].date)}`,W/2,114,{align:'center'});}
+    if(intro){const iL=doc.splitTextToSize(intro,CW);let iy=128;doc.setFontSize(9);doc.setFont('helvetica','italic');doc.setTextColor(...CHARCOAL);iL.forEach(l=>{if(iy>H-MB-10){newPage();iy=MT+8;}doc.text(l,W/2,iy,{align:'center'});iy+=5;});}
+    footer();
+
+    // ── TABLE OF CONTENTS ──
+    logExport('Table of contents…');newPage();
+    doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(...BLUE);doc.text('Table of Contents',ML,MT+10);
+    doc.setDrawColor(...COPPER);doc.setLineWidth(.8);doc.line(ML,MT+13,ML+56,MT+13);
+    let tocY=MT+24;
+    sorted.forEach((w,i)=>{
+      if(tocY>H-MB-8){newPage();tocY=MT+10;}
+      const ds=new Date(w.date+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...COPPER);doc.text(String(i+1).padStart(2,'0'),ML,tocY);
+      doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...CHARCOAL);doc.text(doc.splitTextToSize(w.title,CW-42)[0],ML+9,tocY);
+      doc.setFontSize(7.5);doc.setTextColor(...SLATE);doc.text(ds,W-MR,tocY,{align:'right'});
+      doc.setDrawColor(...SAND);doc.setLineWidth(.3);let dx=ML+9+doc.getTextWidth(doc.splitTextToSize(w.title,CW-42)[0])+3,dateW=doc.getTextWidth(ds);
+      while(dx<W-MR-dateW-4){doc.circle(dx,tocY-1.5,.28,'F');dx+=2.4;}
+      tocY+=6.5;
+    });
+
+    // ── WALK ENTRIES ──
+    for(let i=0;i<sorted.length;i++){
+      const w=sorted[i];
+      logExport(`Walk ${i+1}/${sorted.length}: ${w.title}…`);
+      newPage();
+      let y=MT;
+
+      // Header
+      doc.setFillColor(...BLUE);doc.rect(0,y,W,1.5,'F');y+=4;
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...COPPER);doc.text(`WALK ${String(w.walkNumber||i+1).padStart(2,'0')}`,ML,y+3);
+      doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(...BLUE);
+      const tLines=doc.splitTextToSize(w.title,CW-24);doc.text(tLines,ML,y+11);y+=11+tLines.length*6.5;
+      const d=new Date(w.date+'T12:00:00');
+      doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(...SLATE);
+      doc.text(d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),ML,y);y+=4.5;
+      if(w.start&&w.finish){doc.setFontSize(8);doc.setTextColor(...CHARCOAL);doc.text(`${w.start}  →  ${w.finish}`,ML,y);y+=4.5;}
+      doc.setDrawColor(...COPPER);doc.setLineWidth(.7);doc.line(ML,y+1,W-MR,y+1);y+=6;
+
+      // Metadata + optional map side-by-side
+      const hasMap=w.gpxMap&&w.gpxMap.fileId;
+      let mapDataUrl=null;
+      if(hasMap&&mapMode==='half'){
+        logExport(`  Fetching route map…`);
+        try{mapDataUrl=await driveGetImageDataUrl(w.gpxMap.fileId);}catch(e){mapDataUrl=null;}
+      }
+
+      const metaW=hasMap&&mapDataUrl&&mapMode==='half'?CW*0.52:CW;
+      const mf=[w.distance?['Distance',w.distance+' km']:null,w.elevation?['Ascent',w.elevation+' m']:null,w.walkTime?['Time',w.walkTime+' hrs']:null,w.difficulty?['Difficulty','★'.repeat(w.difficulty)]:null,w.temperature!=null?['Temp',w.temperature+'°C']:null,(w.weather||[]).length?['Weather',(w.weather||[]).join(', ')]:null,(w.ground||[]).length?['Ground',(w.ground||[]).join(', ')]:null,(w.terrain||[]).length?['Terrain',(w.terrain||[]).join(', ')]:null].filter(Boolean);
+      if(mf.length){
+        const rows=Math.ceil(mf.length/2),boxH=rows*7.5+7;
+        doc.setFillColor(...SANDL);doc.rect(ML,y,metaW,boxH,'F');doc.setDrawColor(...SAND);doc.setLineWidth(.25);doc.rect(ML,y,metaW,boxH);
+        const cw=metaW/2;let mx=ML+4,my=y+6,col=0;
+        mf.forEach(([k,v])=>{
+          doc.setFont('helvetica','bold');doc.setFontSize(6);doc.setTextColor(...SLATE);doc.text(k.toUpperCase(),mx,my-2.2);
+          doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...CHARCOAL);doc.text(doc.splitTextToSize(String(v),cw-7)[0],mx,my);
+          col++;if(col%2===0){mx=ML+4;my+=7.5;}else{mx+=cw;}
+        });
+        // Map image beside metadata
+        if(mapDataUrl&&mapMode==='half'){
+          const mapX=ML+metaW+4,mapW=CW-metaW-4;
+          const mapH=boxH;
+          try{
+            const fmt=mapDataUrl.startsWith('data:image/png')?'PNG':'JPEG';
+            doc.addImage(mapDataUrl,fmt,mapX,y,mapW,mapH);
+            doc.setDrawColor(...COPPER);doc.setLineWidth(.5);doc.rect(mapX,y,mapW,mapH);
+          }catch(e){logExport(`  Map embed failed: ${e.message}`,'err');}
+        }
+        y+=boxH+5;
+      }
+
+      // Full-width map (if selected or no side-by-side)
+      if(hasMap&&mapDataUrl&&mapMode==='full'){
+        if(y>H-MB-40){newPage();y=MT+8;}
+        const mapH=60;
+        try{
+          const fmt=mapDataUrl.startsWith('data:image/png')?'PNG':'JPEG';
+          doc.addImage(mapDataUrl,fmt,ML,y,CW,mapH);
+          doc.setDrawColor(...COPPER);doc.setLineWidth(.5);doc.rect(ML,y,CW,mapH);
+        }catch(e){}
+        y+=mapH+5;
+      }
+
+      // People
+      if((w.people||[]).length){
+        if(y>H-MB-18){newPage();y=MT+8;}
+        doc.setFillColor(...COPPER);doc.rect(ML,y,1.8,3.5,'F');doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...COPPER);doc.text('PEOPLE & PETS',ML+4,y+2.8);y+=7;
+        const names=(w.people||[]).map(p=>{const icon=p.role==='dog'?'[dog]':p.role==='cat'?'[cat]':p.role==='other pet'?'[pet]':'';return`${p.name}${icon?' '+icon:''}`;}).join('  ·  ');
+        doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(...CHARCOAL);
+        doc.splitTextToSize(names,CW).forEach(l=>{if(y>H-MB-8){newPage();y=MT+8;}doc.text(l,ML,y);y+=5;});
+        if(w.groupNotes){doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(...SLATE);doc.splitTextToSize(w.groupNotes,CW).forEach(l=>{if(y>H-MB-8){newPage();y=MT+8;}doc.text(l,ML,y);y+=4.5;});}
+        y+=3;
+      }
+
+      // Wildlife
+      if(w.wildlife){
+        if(y>H-MB-18){newPage();y=MT+8;}
+        doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...SLATE);doc.text('WILDLIFE & FLORA',ML,y);y+=5;
+        doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor(...CHARCOAL);
+        doc.splitTextToSize(w.wildlife,CW).forEach(l=>{if(y>H-MB-8){newPage();y=MT+8;}doc.text(l,ML,y);y+=4.5;});y+=3;
+      }
+
+      // Reflections
+      if(w.reflections){
+        if(y>H-MB-28){newPage();y=MT+8;}
+        doc.setFillColor(...COPPER);doc.rect(ML,y,1.8,3.5,'F');doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...COPPER);doc.text('REFLECTIONS',ML+4,y+2.8);y+=8;
+        doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor(...CHARCOAL);
+        doc.splitTextToSize(w.reflections,CW).forEach(l=>{if(y>H-MB-8){newPage();y=MT+8;}doc.text(l,ML,y);y+=5.5;});y+=3;
+      }
+
+      // Tips
+      if(w.tips){
+        if(y>H-MB-22){newPage();y=MT+8;}
+        const tL=doc.splitTextToSize(w.tips,CW-10);const tbH=tL.length*5+12;
+        if(y+tbH>H-MB){newPage();y=MT+8;}
+        doc.setFillColor(...SANDL);doc.rect(ML,y,CW,tbH,'F');doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...SLATE);doc.text('TIPS FOR FUTURE WALKERS',ML+4,y+6);
+        doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(...CHARCOAL);let ty=y+11;tL.forEach(l=>{doc.text(l,ML+4,ty);ty+=5;});y+=tbH+4;
+      }
+
+      // Tags
+      if((w.tags||[]).length){
+        if(y>H-MB-10){newPage();y=MT+8;}
+        doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...SLATE);let tx=ML;
+        (w.tags||[]).forEach(tag=>{const tw=doc.getTextWidth(tag)+5;if(tx+tw>W-MR){tx=ML;y+=6;}doc.setDrawColor(...SAND);doc.setFillColor(...SANDL);doc.roundedRect(tx,y-3,tw,5,1,1,'FD');doc.text(tag,tx+2.5,y);tx+=tw+3;});y+=8;
+      }
+
+      // ── PHOTOS — full-res with aspect-ratio layout ──
+      const drivePhotos=(w.photos||[]).filter(p=>p.driveFileId);
+      if(drivePhotos.length){
+        if(y>H-MB-30){newPage();y=MT+8;}
+        doc.setFillColor(...COPPER);doc.rect(ML,y,1.8,3.5,'F');doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...COPPER);doc.text('PHOTOGRAPHS',ML+4,y+2.8);y+=8;
+
+        logExport(`  Fetching ${drivePhotos.length} photo(s) from Drive…`);
+        // Fetch all photos
+        const photoData=[];
+        for(const photo of drivePhotos){
+          logExport(`  → ${photo.name||photo.driveFileId}…`);
+          const dataUrl=await driveGetImageDataUrl(photo.driveFileId);
+          if(dataUrl){
+            const dims=await loadImageDims(dataUrl);
+            if(dims)photoData.push(dims);
+          }
+        }
+
+        if(photoData.length){
+          // Determine target row height based on mode
+          let targetH=70; // mm default
+          let numCols=2;
+          if(colMode==='1'){targetH=100;numCols=1;}
+          else if(colMode==='3'){targetH=55;numCols=3;}
+          else if(colMode==='auto'){targetH=70;numCols=2;}
+
+          // For fixed columns, group photos into rows of numCols
+          let rows;
+          if(colMode==='auto'){
+            rows=layoutPhotos(photoData,CW,targetH,3);
+          } else {
+            // Fixed columns
+            rows=[];
+            for(let pi=0;pi<photoData.length;pi+=numCols){
+              const chunk=photoData.slice(pi,pi+numCols);
+              // Calculate row height to fill width
+              const availW=CW-3*(numCols-1);
+              const totalAR=chunk.reduce((s,p)=>s+p.w/p.h,0);
+              const rowH=Math.min(availW/totalAR,120);
+              let x=0;
+              rows.push(chunk.map(p=>{
+                const pw=(p.w/p.h)*rowH;
+                const item={...p,x,y:0,pw,ph:rowH};
+                x+=pw+3;return item;
+              }));
+            }
+          }
+
+          // Render each row
+          for(const row of rows){
+            const rowH=row[0].ph;
+            if(y+rowH>H-MB){newPage();y=MT+8;}
+            for(const item of row){
+              const fmt=item.dataUrl.startsWith('data:image/png')?'PNG':'JPEG';
+              try{doc.addImage(item.dataUrl,fmt,ML+item.x,y,item.pw,item.ph);}
+              catch(e){logExport(`  Photo embed failed`,'err');}
+              // Copper border
+              doc.setDrawColor(...COPPER);doc.setLineWidth(.4);doc.rect(ML+item.x,y,item.pw,item.ph);
+            }
+            y+=rowH+3;
+          }
+          y+=4;
+        }
+      }
+
+      // Google Photos link reference
+      if(w.photosLink){
+        if(y>H-MB-10){newPage();y=MT+8;}
+        doc.setFont('helvetica','italic');doc.setFontSize(7.5);doc.setTextColor(100,120,150);
+        doc.text('Google Photos: '+w.photosLink,ML,y,{maxWidth:CW});y+=6;
+      }
+
+      // Walk end motif
+      if(i<sorted.length-1){const bY=Math.min(y+5,H-MB-10);doc.setDrawColor(...SAND);doc.setLineWidth(.4);doc.line(ML,bY,W/2-7,bY);doc.line(W/2+7,bY,W-MR,bY);doc.setFontSize(8);doc.setTextColor(...SAND);doc.text('⊕',W/2,bY+1,{align:'center'});}
+    }
+
+    // ── STATS PAGE ──
+    logExport('Statistics page…');newPage();
+    doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(...BLUE);doc.text('Journey Statistics',ML,MT+10);
+    doc.setDrawColor(...COPPER);doc.setLineWidth(.8);doc.line(ML,MT+13,ML+54,MT+13);
+    let sy=MT+24;
+    [[`Total distance walked`,km.toFixed(1)+' km'],['Total walks recorded',''+walks.length],['Total elevation gain',Math.round(getTotalElev()).toLocaleString()+' m'],['Total hours on path',getTotalHours().toFixed(1)+' hrs'],['Route completed',(km/630*100).toFixed(1)+'%'],['Distance remaining',(630-km).toFixed(1)+' km'],['Average per walk',walks.length?(km/walks.length).toFixed(1)+' km':'–']].forEach(([k,v])=>{doc.setFillColor(...SANDL);doc.rect(ML,sy-3.5,CW,7.5,'F');doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(...CHARCOAL);doc.text(k,ML+4,sy);doc.setFont('helvetica','bold');doc.setTextColor(...BLUE);doc.text(v,W-MR-4,sy,{align:'right'});doc.setDrawColor(...SAND);doc.setLineWidth(.25);doc.line(ML,sy+3.5,W-MR,sy+3.5);sy+=8;});
+    sy+=6;doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...SLATE);doc.text('ROUTE PROGRESS',ML,sy);sy+=4;
+    doc.setFillColor(...SAND);doc.rect(ML,sy,CW,5.5,'F');doc.setFillColor(...BLUE);doc.rect(ML,sy,CW*Math.min(1,km/630),5.5,'F');
+    doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(...SLATE);doc.text('Minehead',ML,sy+9);doc.text('Poole Harbour',W-MR,sy+9,{align:'right'});
+    // People stats
+    const pc={};walks.forEach(w=>(w.people||[]).forEach(p=>{pc[p.name]=(pc[p.name]||0)+1;}));
+    const topPeople=Object.entries(pc).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    if(topPeople.length){sy+=20;doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(...BLUE);doc.text('Walking Companions',ML,sy);doc.setDrawColor(...COPPER);doc.setLineWidth(.8);doc.line(ML,sy+3,ML+50,sy+3);sy+=12;topPeople.forEach(([name,count])=>{doc.setFillColor(...SANDL);doc.rect(ML,sy-3.5,CW,7.5,'F');doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(...CHARCOAL);doc.text(name,ML+4,sy);doc.setFont('helvetica','bold');doc.setTextColor(...BLUE);doc.text(count+' walk'+(count>1?'s':''),W-MR-4,sy,{align:'right'});doc.setDrawColor(...SAND);doc.setLineWidth(.25);doc.line(ML,sy+3.5,W-MR,sy+3.5);sy+=8;});}
+
+    // ── NOTES PAGE ──
+    newPage();
+    doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(...BLUE);doc.text('Acknowledgements & Notes',ML,MT+10);
+    doc.setDrawColor(...COPPER);doc.setLineWidth(.8);doc.line(ML,MT+13,ML+76,MT+13);
+    doc.setFont('helvetica','italic');doc.setFontSize(9);doc.setTextColor(...CHARCOAL);
+    let ay=MT+24;
+    doc.splitTextToSize('The South West Coast Path stretches 630 km from Minehead, Somerset to Poole Harbour, Dorset — England\'s longest National Trail, taking in the dramatic coastlines of Exmoor, North Cornwall, the Penwith Peninsula, and the Jurassic Coast.',CW).forEach(l=>{doc.text(l,ML,ay);ay+=5.5;});
+    ay+=10;doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...SLATE);doc.text('Notes:',ML,ay);ay+=9;
+    for(let li=0;li<16;li++){doc.setDrawColor(...SAND);doc.setLineWidth(.25);doc.line(ML,ay,W-MR,ay);ay+=8;}
+
+    logExport('Saving PDF…','done');
+    doc.save((title.replace(/[^a-zA-Z0-9]/g,'-').toLowerCase()||'swcp-journal')+'.pdf');
+    showToast('PDF exported successfully','success');
+  }catch(err){logExport('ERROR: '+err.message,'err');showToast('Export failed: '+err.message,'error');console.error(err);}
+  btn.disabled=false;btn.textContent='Generate PDF Book';
+}
+
+// =====================================================
+//  LIGHTBOX / TOAST / UTIL
+// =====================================================
+function openLightbox(src){document.getElementById('lightboxImg').src=src;document.getElementById('lightbox').classList.add('open');}
+function closeLightbox(){document.getElementById('lightbox').classList.remove('open');}
+function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type||'');t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),3500);}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).substr(2,6);}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// =====================================================
+//  INIT
+// =====================================================
+(function init(){
+  loadLocal();
+  document.getElementById('fDate').value=new Date().toISOString().split('T')[0];
+  updateStats();renderHome();
+  if(driveConfig)setDriveBadge('connected','Drive connected');
+  else setDriveBadge('disconnected','Google Drive — not connected');
+})();
+</script>
+</body>
+</html>
