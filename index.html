@@ -233,6 +233,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .empty-state h3{font-family:var(--font-display);font-size:1.35rem;font-weight:300;color:var(--slate);margin-bottom:7px}
 .empty-state p{font-size:.88rem;margin-bottom:18px}
 .info-note{padding:11px 15px;background:rgba(74,127,168,.08);border:1px solid rgba(74,127,168,.2);border-radius:var(--radius);font-family:var(--font-ui);font-size:.7rem;color:var(--blue-mid);line-height:1.5;margin-bottom:14px}
+.assets-pending-note{padding:8px 12px;background:rgba(181,96,58,.07);border:1px solid rgba(181,96,58,.28);border-radius:var(--radius);font-family:var(--font-ui);font-size:.65rem;color:var(--copper);line-height:1.5;margin:10px 0 4px;display:flex;align-items:flex-start;gap:7px}
+.assets-pending-note .apn-icon{flex-shrink:0;font-size:.9rem;margin-top:1px}
 .mob-toggle{display:none;position:fixed;top:12px;left:12px;z-index:150;background:var(--blue);color:var(--sand-light);border:none;border-radius:var(--radius);padding:8px 10px;font-size:1.1rem;cursor:pointer}
 @media(max-width:768px){.mob-toggle{display:block}.sidebar{transform:translateX(-100%);transition:transform .3s}.sidebar.open{transform:translateX(0)}.main-content{margin-left:0}.view{padding:22px 15px}.form-grid,.form-grid.thirds{grid-template-columns:1fr}}
 
@@ -556,8 +558,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
         </div>
         <!-- Data integrity tools -->
         <div style="margin-top:20px;padding-top:16px;border-top:var(--rule-faint)">
-          <div style="font-family:var(--font-ui);font-size:.63rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);margin-bottom:10px">Data Integrity &amp; Recovery</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+            <div style="font-family:var(--font-ui);font-size:.63rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--slate)">Data Integrity &amp; Recovery</div>
+            <div id="lastSyncedLabel" style="font-family:var(--font-ui);font-size:.6rem;color:var(--slate-light)">Not yet synced this session</div>
+          </div>
           <div style="font-family:var(--font-ui);font-size:.65rem;color:var(--slate-light);line-height:1.5;margin-bottom:12px">Each walk's data is also saved as an individual JSON file within its Drive subfolder, allowing reconstruction of the master record from distributed backups.</div>
+          <!-- Failed items panel — hidden when queue is clean -->
+          <div id="failedItemsPanel" style="display:none;margin-bottom:12px;padding:10px 12px;background:rgba(181,96,58,.06);border:1px solid rgba(181,96,58,.25);border-radius:var(--radius)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+              <span style="font-family:var(--font-ui);font-size:.63rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--copper)">⚠ Sync failures</span>
+              <button class="btn btn-danger" style="padding:3px 9px;font-size:.58rem" onclick="outboxClearFailed()">Dismiss all</button>
+            </div>
+            <div id="failedItemsList"></div>
+            <div style="font-family:var(--font-ui);font-size:.62rem;color:var(--slate-light);margin-top:7px;line-height:1.45">These operations could not be completed after repeated attempts. Your data is safe locally. Use "Restore from Subfolders" if Drive state is uncertain.</div>
+          </div>
           <div class="form-actions" style="flex-wrap:wrap">
             <button class="btn btn-secondary" onclick="restoreFromDriveMirror();closeDriveModal()" title="Rebuild master data by reading individual walk JSON files from each Drive subfolder">🔄 Restore from Subfolders</button>
             <button class="btn btn-secondary" onclick="downloadLocalMirror()" title="Download a clean JSON snapshot of all walk data (no embedded images) to your local disk">⬇ Download JSON Backup</button>
@@ -869,10 +883,14 @@ function onSignedIn(){
       document.getElementById('disconnectBtn').style.display='inline-flex';
       setDriveBadge('connected','Drive connected');
     }
+    // Token now confirmed valid — flush any queue that built up during expiry
+    outboxFlush();
   }).catch(()=>{
     // Profile fetch failed but token may still be valid — show signed-in state anyway
     document.getElementById('driveSignedOut').style.display='none';
     document.getElementById('driveSignedIn').style.display='block';
+    // Attempt flush regardless; driveRequest will handle a truly dead token
+    outboxFlush();
   });
 }
 
@@ -1029,18 +1047,46 @@ async function driveGetImageDataUrl(fileId){
 //  re-attempted manually via the Drive modal.
 //
 //  Outbox item schema:
-//    { id, type, payload, createdAt, attempts }
-//    type ∈ { 'sync_master', 'sidecar' }
-//    payload for sync_master: { walks: [...] }  (stripped of dataUrls)
-//    payload for sidecar:     { walk, subFolderId }
+//    { id, type, status, payload, createdAt, attempts, lastAttempt, lastError }
+//    type   ∈ { 'sync_master', 'sidecar', 'create_subfolder' }
+//    status ∈ { 'pending', 'failed' }
+//      'pending' — will be retried on the next flush
+//      'failed'  — exhausted OUTBOX_MAX_ATTEMPTS; persisted for user visibility,
+//                  never retried automatically, cleared by user via Drive modal
+//
+//  create_subfolder payload: { walkId, walkNumber, walkTitle }
+//    On flush: creates the Drive subfolder, writes the per-walk sidecar JSON,
+//    and updates the walk record in walks[] + localStorage with the resolved
+//    subFolderId. Binary assets (photos, GPX) are NOT uploaded — those require
+//    the user to re-edit the walk and re-attach the files. The walk card in
+//    History shows an amber notice until all local-only assets are uploaded.
+//
+//  Network-error discrimination: TypeError ('Failed to fetch') indicates the
+//  request never reached Google's servers and is almost certainly a connectivity
+//  issue. These do NOT increment the attempt counter. HTTP 4xx/5xx errors
+//  (where the server was reached) DO increment it, as they indicate a problem
+//  that retrying the same request is unlikely to fix without user intervention.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const OUTBOX_KEY = 'swcp_outbox';
-const OUTBOX_MAX_ATTEMPTS = 8;        // discard after this many consecutive failures
-const OUTBOX_RETRY_INTERVAL = 30000;  // ms between flush sweeps when online
+const OUTBOX_KEY        = 'swcp_outbox';
+const LAST_SYNCED_KEY   = 'swcp_last_synced';   // ISO timestamp of last successful Drive write
+const OUTBOX_MAX_ATTEMPTS = 8;                   // API/auth failures before transitioning to 'failed'
+const OUTBOX_RETRY_INTERVAL = 30000;             // ms between automatic flush sweeps
 
-/** @type {ReturnType<typeof setInterval>|null} Handle for the flush timer. */
+/** @type {ReturnType<typeof setInterval>|null} Handle for the background flush timer. */
 let _outboxTimer = null;
+
+/**
+ * Return true if an error from a Drive operation looks like a pure network
+ * failure (request never reached the server) rather than an API-level error.
+ * Used to decide whether to charge an attempt against the retry budget.
+ * @param {Error} e
+ * @returns {boolean}
+ */
+function isNetworkError(e){
+  // TypeError thrown by fetch() when the connection fails before a response
+  return e instanceof TypeError && /failed to fetch|network/i.test(e.message);
+}
 
 /**
  * Read the current outbox array from localStorage.
@@ -1059,24 +1105,59 @@ function outboxSave(items){
 }
 
 /**
- * Enqueue a Drive operation.  Deduplicates by type so that rapid saves do not
- * accumulate redundant master-sync entries — a later enqueue simply replaces an
- * earlier same-type pending item.
+ * Record the current time as the last-successful-sync timestamp and refresh UI.
+ */
+function outboxMarkSynced(){
+  const ts = new Date().toISOString();
+  try{localStorage.setItem(LAST_SYNCED_KEY, ts);}catch(e){}
+  updateOutboxBadge();
+}
+
+/**
+ * Return a human-readable "last synced" string, or null if never synced.
+ * @returns {string|null}
+ */
+function outboxLastSyncedLabel(){
+  try{
+    const ts = localStorage.getItem(LAST_SYNCED_KEY);
+    if(!ts) return null;
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMin = Math.round((now - d) / 60000);
+    if(diffMin < 1)  return 'just now';
+    if(diffMin < 60) return `${diffMin} min ago`;
+    const diffH = Math.round(diffMin / 60);
+    if(diffH < 24)   return `${diffH} hr ago`;
+    // Different calendar day — show date
+    return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  }catch(e){return null;}
+}
+
+/**
+ * Enqueue a Drive operation. Deduplicates by type so that rapid saves do not
+ * accumulate redundant master-sync entries — a later enqueue replaces an
+ * earlier same-type pending item. Items in 'failed' state are replaced too,
+ * giving the user a fresh retry budget after new activity.
  * @param {'sync_master'|'sidecar'} type
  * @param {Object} payload
  */
 function outboxEnqueue(type, payload){
   const items = outboxLoad();
-  // For sync_master, replace any existing pending entry (idempotent coalescing)
   if(type === 'sync_master'){
+    // Coalesce — one master-sync entry at most; replace regardless of status
     const idx = items.findIndex(i => i.type === 'sync_master');
-    const entry = {id: uid(), type, payload, createdAt: new Date().toISOString(), attempts: 0};
+    const entry = {id:uid(), type, status:'pending', payload, createdAt:new Date().toISOString(), attempts:0, lastAttempt:null, lastError:null};
+    if(idx >= 0) items[idx] = entry; else items.push(entry);
+  } else if(type === 'create_subfolder'){
+    // One entry per walk ID — replace regardless of status
+    const idx = items.findIndex(i => i.type === 'create_subfolder' && i.payload.walkId === payload.walkId);
+    const entry = {id:uid(), type, status:'pending', payload, createdAt:new Date().toISOString(), attempts:0, lastAttempt:null, lastError:null};
     if(idx >= 0) items[idx] = entry; else items.push(entry);
   } else {
-    // For sidecars, key by subFolderId to avoid duplicates on repeated edits
+    // Sidecar — key by subFolderId; replace regardless of status
     const key = payload.subFolderId;
     const idx = key ? items.findIndex(i => i.type === 'sidecar' && i.payload.subFolderId === key) : -1;
-    const entry = {id: uid(), type, payload, createdAt: new Date().toISOString(), attempts: 0};
+    const entry = {id:uid(), type, status:'pending', payload, createdAt:new Date().toISOString(), attempts:0, lastAttempt:null, lastError:null};
     if(idx >= 0) items[idx] = entry; else items.push(entry);
   }
   outboxSave(items);
@@ -1084,23 +1165,29 @@ function outboxEnqueue(type, payload){
 }
 
 /**
- * Attempt to flush all queued outbox items in order.
- * Skips the run if the browser reports offline, or Drive is not configured.
- * Items that exhaust OUTBOX_MAX_ATTEMPTS are discarded with a console warning.
- * Called automatically by the retry timer and on the 'online' event.
+ * Attempt to flush all 'pending' outbox items in order.
+ * Skips silently if offline, Drive not configured, or no token.
+ * Network errors (TypeError) do not consume a retry attempt — they indicate
+ * the request never reached Google's servers and will be retried on the next
+ * sweep without penalty. API-level errors (HTTP 4xx/5xx) do consume an attempt;
+ * items that exhaust OUTBOX_MAX_ATTEMPTS transition to 'failed' and are
+ * preserved in the outbox for user visibility rather than silently discarded.
  */
 async function outboxFlush(){
-  if(!navigator.onLine) return;
+  if(!navigator.onLine)   return;
   if(!driveConfig || !oauthToken) return;
   const items = outboxLoad();
-  if(!items.length) return;
+  const pending = items.filter(i => i.status === 'pending');
+  if(!pending.length) return;
 
-  const remaining = [];
-  for(const item of items){
+  let anySucceeded = false;
+
+  for(const item of pending){
     let ok = false;
+    let networkFail = false;
     try{
       if(item.type === 'sync_master'){
-        // Coalesce with current walk state — always write the freshest data
+        // Always write the freshest in-memory state, not a stale payload snapshot
         const content = JSON.stringify(walks, null, 2);
         const res = await driveWriteJSON(
           driveConfig.folderId, driveConfig.dataFileId,
@@ -1113,82 +1200,199 @@ async function outboxFlush(){
       } else if(item.type === 'sidecar'){
         await writePerWalkJson(item.payload.walk, item.payload.subFolderId);
         ok = true;
+      } else if(item.type === 'create_subfolder'){
+        // Create the Drive subfolder for a walk that was saved while offline.
+        // Binary assets cannot be recovered here — only the folder structure
+        // and sidecar JSON are created. The walk record is updated in-memory
+        // and persisted so the History card warning clears for the sidecar,
+        // while the photo/GPX warning remains until the user re-uploads.
+        const {walkId, walkNumber, walkTitle} = item.payload;
+        const walk = walks.find(w => w.id === walkId);
+        if(!walk) { ok = true; break; } // walk deleted — nothing to do
+
+        const subFolderId = await ensureWalkSubfolder(walkNumber, walkTitle);
+        if(!subFolderId) throw new Error('Subfolder creation returned null');
+
+        // Write the per-walk sidecar JSON
+        await writePerWalkJson(walk, subFolderId);
+
+        // Stamp the resolved subFolderId onto any local-only photos in the
+        // walk record so the edit flow can find the folder on re-upload
+        const updatedPhotos = (walk.photos || []).map(p =>
+          p.status === 'local' ? {...p, driveFolderId: subFolderId} : p
+        );
+        const updatedWalk = {...walk, photos: updatedPhotos, _subFolderId: subFolderId};
+        const idx = walks.findIndex(w => w.id === walkId);
+        if(idx >= 0) walks[idx] = updatedWalk;
+        saveLocal();
+        // Queue a master sync to propagate the updated walk record to Drive
+        outboxEnqueue('sync_master', {});
+        // Re-render History if it's visible so the card reflects new state
+        if(document.getElementById('view-history')?.classList.contains('active')) renderHistory();
+        ok = true;
       }
     } catch(e){
-      console.warn('Outbox flush failed for', item.type, e);
+      networkFail = isNetworkError(e);
+      item.lastError = e.message;
+      console.warn('Outbox flush failed for', item.type, networkFail ? '(network)' : '(API)', e.message);
     }
 
-    if(!ok){
+    item.lastAttempt = new Date().toISOString();
+
+    if(ok){
+      // Remove from items array on success
+      const idx = items.findIndex(i => i.id === item.id);
+      if(idx >= 0) items.splice(idx, 1);
+      anySucceeded = true;
+    } else if(!networkFail){
+      // API/auth failure — charge the attempt budget
       item.attempts = (item.attempts || 0) + 1;
-      if(item.attempts < OUTBOX_MAX_ATTEMPTS) remaining.push(item);
-      else console.warn('Outbox: discarding item after max attempts', item.id, item.type);
+      if(item.attempts >= OUTBOX_MAX_ATTEMPTS){
+        item.status = 'failed';
+        console.warn('Outbox: item moved to failed state after max attempts', item.id, item.type);
+      }
     }
+    // Network failure — leave item.attempts unchanged, will retry next sweep
   }
 
-  outboxSave(remaining);
+  outboxSave(items);
+
+  if(anySucceeded) outboxMarkSynced();
   updateOutboxBadge();
 
-  // Update Drive badge if queue is now clear
-  if(!remaining.length && driveConfig && oauthToken){
-    setDriveBadge('connected', 'Drive — saved ✓');
+  const stillPending = items.filter(i => i.status === 'pending').length;
+  if(!stillPending && driveConfig && oauthToken){
+    const failed = items.filter(i => i.status === 'failed').length;
+    if(!failed) setDriveBadge('connected', 'Drive — saved ✓');
   }
 }
 
 /**
- * Update the sidebar Drive badge and optional outbox count indicator.
- * Shows a queued-count suffix when items are pending.
+ * Update all outbox-related UI elements:
+ *   - Sidebar badge pill (pending count)
+ *   - Drive badge text (queued / failed / last synced)
+ *   - Drive modal counts and failed-items panel
  */
 function updateOutboxBadge(){
-  const items = outboxLoad();
-  const count = items.length;
+  const items   = outboxLoad();
+  const pending = items.filter(i => i.status === 'pending').length;
+  const failed  = items.filter(i => i.status === 'failed').length;
+  const total   = pending + failed;
+
+  // Sidebar pill — shows pending count only (failed items shown separately in modal)
   const badge = document.getElementById('outboxBadge');
   if(badge){
-    badge.textContent = count ? count : '';
-    badge.style.display = count ? 'inline-flex' : 'none';
+    badge.textContent    = pending || '';
+    badge.style.display  = pending ? 'inline-flex' : 'none';
   }
-  // Keep the modal count in sync
+
+  // Drive modal — pending count on flush button
   const modalCount = document.getElementById('outboxCount');
-  if(modalCount) modalCount.textContent = count;
+  if(modalCount) modalCount.textContent = pending;
   const flushBtn = document.getElementById('flushOutboxBtn');
-  if(flushBtn) flushBtn.style.opacity = count ? '1' : '0.5';
-  // If items are pending, nudge the drive badge text
-  if(count && driveConfig){
-    setDriveBadge('syncing', `Drive — ${count} queued`);
+  if(flushBtn) flushBtn.style.opacity = pending ? '1' : '0.5';
+
+  // Drive modal — last synced timestamp
+  const syncedEl = document.getElementById('lastSyncedLabel');
+  if(syncedEl){
+    const label = outboxLastSyncedLabel();
+    syncedEl.textContent = label ? `Last synced: ${label}` : 'Not yet synced this session';
   }
+
+  // Drive modal — failed items panel
+  const failedPanel = document.getElementById('failedItemsPanel');
+  const failedList  = document.getElementById('failedItemsList');
+  if(failedPanel && failedList){
+    failedPanel.style.display = failed ? 'block' : 'none';
+    if(failed){
+      failedList.innerHTML = items
+        .filter(i => i.status === 'failed')
+        .map(i => {
+          const label = i.type === 'sync_master'
+            ? 'Master JSON sync'
+            : i.type === 'create_subfolder'
+              ? `Subfolder setup — ${esc(i.payload.walkTitle||'walk')}`
+              : `Walk sidecar (${i.payload.subFolderId||'?'})`;
+          const when  = i.lastAttempt ? new Date(i.lastAttempt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '—';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:var(--rule-faint)">
+            <span style="font-family:var(--font-ui);font-size:.65rem;color:var(--copper)">⚠ ${esc(label)}</span>
+            <span style="font-family:var(--font-ui);font-size:.6rem;color:var(--slate-light)">${when}</span>
+            <button class="btn btn-secondary" style="padding:3px 9px;font-size:.58rem" onclick="outboxRetryFailed('${i.id}')">Retry</button>
+          </div>`;
+        }).join('');
+    }
+  }
+
+  // Drive badge text
+  if(driveConfig){
+    if(pending)      setDriveBadge('syncing',      `Drive — ${pending} queued`);
+    else if(failed)  setDriveBadge('disconnected',  `Drive — ${failed} failed`);
+    // If all clear, the caller (outboxFlush / outboxMarkSynced) sets the badge
+  }
+}
+
+/**
+ * Reset a specific failed item back to 'pending' status with a fresh attempt
+ * budget, then immediately attempt a flush.
+ * @param {string} id - Outbox item ID.
+ */
+async function outboxRetryFailed(id){
+  const items = outboxLoad();
+  const item  = items.find(i => i.id === id);
+  if(!item) return;
+  item.status   = 'pending';
+  item.attempts = 0;
+  item.lastError = null;
+  outboxSave(items);
+  updateOutboxBadge();
+  await outboxFlush();
+}
+
+/**
+ * Clear all items in 'failed' state from the outbox. Data is not lost —
+ * the next walk save will re-enqueue a fresh master sync if needed.
+ */
+function outboxClearFailed(){
+  const items = outboxLoad().filter(i => i.status !== 'failed');
+  outboxSave(items);
+  updateOutboxBadge();
+  showToast('Failed sync items cleared');
 }
 
 /**
  * Manual flush triggered from the Drive modal "Sync Queued Changes" button.
- * Provides user feedback via toast.
  */
 async function flushOutboxManual(){
   const items = outboxLoad();
-  if(!items.length){showToast('No queued changes to sync');return;}
+  const pending = items.filter(i => i.status === 'pending').length;
+  if(!pending){showToast('No queued changes to sync');return;}
   if(!navigator.onLine){showToast('Device is offline — cannot sync now','error');return;}
   if(!oauthToken){showToast('Sign in to Drive first','error');return;}
   showToast('Syncing queued changes…');
   await outboxFlush();
-  const remaining = outboxLoad();
-  if(!remaining.length) showToast('All queued changes synced to Drive','success');
-  else showToast(`${remaining.length} operation(s) still pending — will retry`,'error');
+  const remaining = outboxLoad().filter(i => i.status === 'pending').length;
+  const nowFailed = outboxLoad().filter(i => i.status === 'failed').length;
+  if(!remaining && !nowFailed) showToast('All queued changes synced to Drive','success');
+  else if(nowFailed)           showToast(`${nowFailed} operation(s) failed — see Drive settings`,'error');
+  else                         showToast(`${remaining} operation(s) still pending — will retry`,'error');
 }
 
 /**
- * Start the background outbox flush timer and bind online/offline events.
- * Safe to call multiple times — guards against duplicate timers.
+ * Start the background outbox flush timer and bind connectivity events.
+ * Safe to call multiple times — the timer guard prevents duplicates.
  */
 function outboxInit(){
   if(_outboxTimer) return;
   _outboxTimer = setInterval(outboxFlush, OUTBOX_RETRY_INTERVAL);
-  window.addEventListener('online', () => {
+  window.addEventListener('online', ()=>{
     showToast('Back online — syncing queued changes…');
     outboxFlush();
   });
-  window.addEventListener('offline', () => {
-    showToast('Offline — changes will sync when reconnected', 'error');
-    if(driveConfig) setDriveBadge('disconnected', 'Drive — offline, changes queued');
+  window.addEventListener('offline', ()=>{
+    showToast('Offline — changes will sync when reconnected','error');
+    if(driveConfig) setDriveBadge('disconnected','Drive — offline, changes queued');
   });
-  // Flush any leftover queue from a previous session
+  // Flush any queue carried over from a previous session
   outboxFlush();
 }
 
@@ -1207,6 +1411,8 @@ function outboxInit(){
  */
 function openDriveModal(){
   document.getElementById('driveModal').classList.add('open');
+  // Refresh sync state display every time the modal is opened
+  updateOutboxBadge();
   // Show signed-in panel if we have a live token OR if drive is already configured
   // (so recovery buttons are always reachable even after token expiry)
   if(oauthToken||driveConfig){
@@ -2110,6 +2316,16 @@ async function persistWalk(walk,subFolderId,btn){
       const ok=await safeAsync(()=>writePerWalkJson(walk,subFolderId),'Walk record sidecar');
       if(ok===null) outboxEnqueue('sidecar',{walk,subFolderId});
     }
+  } else {
+    // subFolderId is null — the subfolder was never created (offline at save time
+    // or Drive subfolder call failed). Queue a deferred job to create the folder
+    // and sidecar on reconnect. Binary assets cannot be recovered and must be
+    // re-uploaded by the user via the edit walk flow.
+    outboxEnqueue('create_subfolder', {
+      walkId:    walk.id,
+      walkNumber: walk.walkNumber,
+      walkTitle:  walk.title,
+    });
   }
 
   // Master Drive sync — attempt live; enqueue to outbox on failure or if offline
@@ -2264,6 +2480,29 @@ function renderHome(){
 }
 
 /**
+ * Return a descriptor of unuploaded assets for a walk record, or null if
+ * everything is synced. Used to drive the amber warning in the History card.
+ * A walk has pending assets if:
+ *   - Any photo is still status:'local' (no driveFileId)
+ *   - gpxMap is null and the walk was saved with Drive connected (i.e. it is
+ *     not merely that no GPX was provided — we can't distinguish that here,
+ *     so we check for the outbox create_subfolder job as a proxy)
+ * @param {Object} w - Walk record.
+ * @returns {{photos:number, gpx:boolean, subfolderQueued:boolean}|null}
+ */
+function walkHasPendingAssets(w){
+  const localPhotos = (w.photos||[]).filter(p => p.status === 'local' && !p.driveFileId).length;
+  const subfolderQueued = outboxLoad().some(
+    i => (i.type === 'create_subfolder' || i.type === 'sidecar') &&
+         (i.payload.walkId === w.id || i.payload.walk?.id === w.id)
+  );
+  // gpxMap being null AND subfolder queued strongly implies GPX was not uploaded
+  const gpxPending = !w.gpxMap && subfolderQueued;
+  if(!localPhotos && !subfolderQueued) return null;
+  return {photos: localPhotos, gpx: gpxPending, subfolderQueued};
+}
+
+/**
  * Render the History view: filter walks by search query and display as
  * collapsible cards with full metadata, photos links, and action buttons.
  */
@@ -2295,8 +2534,22 @@ function renderHistory(){
       w.visibility?['Visibility',esc(w.visibility)]:null,w.tide?['Tide',esc(w.tide)]:null,
       w.wildlife?['Wildlife & Flora',esc(w.wildlife),true]:null,
     ].filter(Boolean);
-    return`<div class="walk-card" id="card-${w.id}"><div class="walk-card-header" onclick="toggleCard('${w.id}')"><div class="walk-feed-date-block"><div class="walk-feed-day">${d.getDate()}</div><div class="walk-feed-month">${d.toLocaleString('en-GB',{month:'short'}).toUpperCase()}</div></div><div style="flex:1"><div class="walk-feed-title">${esc(w.title)}</div><div class="walk-feed-meta"><span>${esc(w.start)} → ${esc(w.finish)}</span>${w.distance?`<span>📏 ${w.distance} km</span>`:''}${(w.people||[]).length?`<span>👥 ${(w.people||[]).length} companion${(w.people||[]).length>1?'s':''}</span>`:''}</div></div><span class="walk-card-expand">▼</span></div>
+    const pending = walkHasPendingAssets(w);
+    const pendingBanner = pending ? (()=>{
+      const parts = [];
+      if(pending.subfolderQueued) parts.push('Drive folder &amp; walk record');
+      if(pending.photos)          parts.push(`${pending.photos} photo${pending.photos>1?'s':''}`);
+      if(pending.gpx)             parts.push('GPX / route map');
+      const what = parts.join(', ');
+      const reupload = pending.photos || pending.gpx
+        ? ' Photos and GPX must be re-attached via <strong>Edit</strong> when connectivity allows.'
+        : '';
+      return `<div class="assets-pending-note"><span class="apn-icon">⚠</span><span><strong>Not yet uploaded to Drive:</strong> ${what}.${reupload}</span></div>`;
+    })() : '';
+    const pendingIndicator = pending ? ' <span style="font-family:var(--font-ui);font-size:.55rem;font-weight:600;letter-spacing:.05em;color:var(--copper);background:rgba(181,96,58,.1);border:1px solid rgba(181,96,58,.28);border-radius:10px;padding:1px 6px;vertical-align:middle">⚠ assets pending</span>' : '';
+    return`<div class="walk-card" id="card-${w.id}"><div class="walk-card-header" onclick="toggleCard('${w.id}')"><div class="walk-feed-date-block"><div class="walk-feed-day">${d.getDate()}</div><div class="walk-feed-month">${d.toLocaleString('en-GB',{month:'short'}).toUpperCase()}</div></div><div style="flex:1"><div class="walk-feed-title">${esc(w.title)}${pendingIndicator}</div><div class="walk-feed-meta"><span>${esc(w.start)} → ${esc(w.finish)}</span>${w.distance?`<span>📏 ${w.distance} km</span>`:''}${(w.people||[]).length?`<span>👥 ${(w.people||[]).length} companion${(w.people||[]).length>1?'s':''}</span>`:''}</div></div><span class="walk-card-expand">▼</span></div>
     <div class="walk-card-body">
+      ${pendingBanner}
       <div class="meta-grid">${metaItems.map(([k,v,full])=>`<div class="meta-item"${full?' style="grid-column:1/-1"':''}><div class="meta-key">${k}</div><div class="meta-val">${v}</div></div>`).join('')}</div>
       ${peopleBadges?`<div style="margin-bottom:10px"><div class="meta-key" style="margin-bottom:5px">People & Pets</div><div class="people-display">${peopleBadges}</div>${w.groupNotes?`<div style="font-size:.88rem;color:var(--slate);font-style:italic;margin-top:4px">${esc(w.groupNotes)}</div>`:''}</div>`:''}
       ${w.reflections?`<div class="reflections-display">${esc(w.reflections).replace(/\n/g,'<br>')}</div>`:''}
