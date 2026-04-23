@@ -7,9 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 /* ── DESIGN TOKENS ── */
 :root {
@@ -631,6 +628,90 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 <div class="toast" id="toast"></div>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SECTION 0 — LAZY SCRIPT LOADERS
+//
+//  jsPDF (~350 KB), Leaflet JS (~150 KB), and the Google Identity Services
+//  client are loaded on demand rather than at page startup:
+//
+//    loadJsPDF()   — resolved when window.jspdf is available.
+//                    Injected when the export modal opens (Option C);
+//                    awaited inside exportPDF() (Option A).
+//
+//    loadLeaflet() — resolved when window.L is available.
+//                    Injected when the Log view is entered (Option C);
+//                    awaited inside renderGpxMap() (Option A).
+//
+//    loadGIS()     — resolved when google.accounts is available.
+//                    Injected when the Drive modal opens (Option C);
+//                    initGIS() already retries until the library is present (Option A).
+//
+//  Each loader is idempotent: a second call while loading is in progress returns
+//  the same Promise, and a call after load resolves immediately.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** @type {Promise<void>|null} In-flight or settled jsPDF load promise. */
+let _jspdfLoader = null;
+/**
+ * Ensure jsPDF is available, injecting its script on first call.
+ * @returns {Promise<void>} Resolves when window.jspdf is ready.
+ */
+function loadJsPDF(){
+  if(window.jspdf) return Promise.resolve();
+  if(_jspdfLoader) return _jspdfLoader;
+  _jspdfLoader = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload  = ()=>resolve();
+    s.onerror = ()=>{ _jspdfLoader=null; reject(new Error('Failed to load PDF library — check your connection')); };
+    document.head.appendChild(s);
+  });
+  return _jspdfLoader;
+}
+
+/** @type {Promise<void>|null} In-flight or settled Leaflet JS load promise. */
+let _leafletLoader = null;
+/**
+ * Ensure Leaflet JS is available, injecting its script on first call.
+ * The Leaflet CSS is always present in <head> (required for map layout).
+ * @returns {Promise<void>} Resolves when window.L is ready.
+ */
+function loadLeaflet(){
+  if(window.L) return Promise.resolve();
+  if(_leafletLoader) return _leafletLoader;
+  _leafletLoader = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+    s.onload  = ()=>resolve();
+    s.onerror = ()=>{ _leafletLoader=null; reject(new Error('Failed to load map library — check your connection')); };
+    document.head.appendChild(s);
+  });
+  return _leafletLoader;
+}
+
+/** @type {Promise<void>|null} In-flight or settled GIS client load promise. */
+let _gisLoader = null;
+/**
+ * Ensure the Google Identity Services client script is available,
+ * injecting it on first call. initGIS() already polls for google.accounts,
+ * so the retry loop serves as Option A for GIS.
+ * @returns {Promise<void>} Resolves when google.accounts is ready.
+ */
+function loadGIS(){
+  if(typeof google!=='undefined'&&google.accounts) return Promise.resolve();
+  if(_gisLoader) return _gisLoader;
+  _gisLoader = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onload  = ()=>resolve();
+    s.onerror = ()=>{ _gisLoader=null; reject(new Error('Failed to load Google sign-in library — check your connection')); };
+    document.head.appendChild(s);
+  });
+  return _gisLoader;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SECTION 1 — CONFIGURATION
 //
@@ -1413,6 +1494,12 @@ function openDriveModal(){
   document.getElementById('driveModal').classList.add('open');
   // Refresh sync state display every time the modal is opened
   updateOutboxBadge();
+  // Option C: inject the GIS client on first open and kick off initGIS().
+  // initGIS() internally polls until google.accounts is available (Option A),
+  // so there's no need to await the loader here. loadGIS() is idempotent,
+  // so repeat modal opens cost nothing.
+  loadGIS().then(()=>{ if(!gisReady) initGIS(); })
+           .catch(err=>showDriveStatus(err.message,2));
   // Show signed-in panel if we have a live token OR if drive is already configured
   // (so recovery buttons are always reachable even after token expiry)
   if(oauthToken||driveConfig){
@@ -1781,6 +1868,14 @@ async function loadGpxFile(file){
  */
 async function renderGpxMap(pts){
   showGpxStatus('Rendering map…','uploading');
+  // Option A: ensure Leaflet JS is loaded before using L.*. In normal flow this
+  // resolves immediately because Option C injected it when the Log view opened.
+  try{
+    await loadLeaflet();
+  }catch(err){
+    showGpxStatus('Map library failed to load — check your connection','error');
+    return;
+  }
   const preview=document.getElementById('gpxMapPreview');
   preview.style.display='block';
   // Destroy old map
@@ -1986,6 +2081,9 @@ function showView(id,navEl){
   if(id==='home')renderHome();
   if(id==='history')renderHistory();
   if(id==='progress')renderProgress();
+  // Option C: begin fetching Leaflet JS as soon as the Log view is entered,
+  // so the library is ready (or nearly so) by the time the user uploads a GPX.
+  if(id==='log') loadLeaflet();
   document.getElementById('sidebar').classList.remove('open');
 }
 /** Toggle the mobile sidebar open/closed. */
@@ -2594,7 +2692,14 @@ function renderProgress(){
 //  Full-resolution photo fetch from Drive, aspect-ratio photo layout algorithm, and jsPDF rendering. APP_CONFIG.pdf supplies colour constants and default title text.
 // ═══════════════════════════════════════════════════════════════════════════════
 /** Open the PDF export modal and reset the progress log. */
-function openExportModal(){document.getElementById('exportModal').classList.add('open');document.getElementById('exportLog').style.display='none';document.getElementById('exportLog').innerHTML='';}
+function openExportModal(){
+  document.getElementById('exportModal').classList.add('open');
+  document.getElementById('exportLog').style.display='none';
+  document.getElementById('exportLog').innerHTML='';
+  // Option C: begin fetching jsPDF as soon as the modal opens so the library
+  // is ready (or nearly so) by the time the user clicks Generate PDF Book.
+  loadJsPDF();
+}
 /**
  * Append a line to the PDF export progress log panel.
  * @param {string} msg - Log message text.
@@ -2682,6 +2787,20 @@ async function exportPDF(){
   const colMode=document.getElementById('expPhotoCols').value;
   const mapMode=document.getElementById('expMaps').value;
   const sorted=[...walks].sort((a,b)=>a.date.localeCompare(b.date));
+
+  // Option A: ensure jsPDF is loaded before proceeding. In the normal flow this
+  // resolves immediately because Option C injected it when the modal opened.
+  // If the user somehow reaches this point without the library (e.g. slow
+  // connection, modal opened and clicked very quickly), this waits for it.
+  try{
+    btn.textContent='Loading PDF library…';
+    await loadJsPDF();
+  }catch(err){
+    showToast(err.message,'error');
+    btn.disabled=false;btn.textContent='Generate PDF Book';
+    return;
+  }
+  btn.textContent='Generating…';
 
   logExport('Initialising PDF engine…');
   try{
@@ -3004,8 +3123,10 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
   if(driveConfig&&oauthToken)setDriveBadge('connected','Drive connected');
   else if(driveConfig&&!oauthToken)setDriveBadge('disconnected','Drive — sign in to sync');
   else setDriveBadge('disconnected','Google Drive — not connected');
-  // Initialise Google Identity Services
-  initGIS();
+  // Google Identity Services is no longer initialised here — it's loaded lazily
+  // the first time the Drive modal is opened (see openDriveModal / loadGIS).
+  // The sidebar badge state above is derived from cached token/config alone,
+  // and the outbox flush loop runs independently of GIS.
   // Start offline outbox flush loop
   outboxInit();
   updateOutboxBadge();
