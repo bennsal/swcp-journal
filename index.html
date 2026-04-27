@@ -631,8 +631,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SECTION 0 — LAZY SCRIPT LOADERS
 //
-//  jsPDF (~350 KB), Leaflet JS (~150 KB), and the Google Identity Services
-//  client are loaded on demand rather than at page startup:
+//  jsPDF (~350 KB), Leaflet JS (~150 KB), JSZip (~100 KB), and the Google
+//  Identity Services client are loaded on demand rather than at page startup:
 //
 //    loadJsPDF()   — resolved when window.jspdf is available.
 //                    Injected when the export modal opens (Option C);
@@ -642,9 +642,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 //                    Injected when the Log view is entered (Option C);
 //                    awaited inside renderGpxMap() (Option A).
 //
+//    loadJSZip()   — resolved when window.JSZip is available.
+//                    Injected on first ZIP backup/restore action (Phase A added,
+//                    consumed in Phase B/D).
+//
 //    loadGIS()     — resolved when google.accounts is available.
 //                    Injected when the Drive modal opens (Option C);
 //                    initGIS() already retries until the library is present (Option A).
+//                    DEPRECATED — removed entirely in Phase B alongside Drive code.
 //
 //  Each loader is idempotent: a second call while loading is in progress returns
 //  the same Promise, and a call after load resolves immediately.
@@ -712,6 +717,26 @@ function loadGIS(){
   return _gisLoader;
 }
 
+/** @type {Promise<void>|null} In-flight or settled JSZip load promise. */
+let _jszipLoader = null;
+/**
+ * Ensure JSZip is available, injecting its script on first call.
+ * Used by ZIP backup/restore (Option D) and schema export bundling.
+ * @returns {Promise<void>} Resolves when window.JSZip is ready.
+ */
+function loadJSZip(){
+  if(window.JSZip) return Promise.resolve();
+  if(_jszipLoader) return _jszipLoader;
+  _jszipLoader = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload  = ()=>resolve();
+    s.onerror = ()=>{ _jszipLoader=null; reject(new Error('Failed to load ZIP library — check your connection')); };
+    document.head.appendChild(s);
+  });
+  return _jszipLoader;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SECTION 1 — CONFIGURATION
 //
@@ -725,9 +750,10 @@ function loadGIS(){
 const APP_CONFIG = {
 
   // ── Identity ──────────────────────────────────────────────────────────────
+  appId:       'swcp-journal',   // schema generatedBy; Munro app overrides to 'munro-journal'
   appName:     'South West Coast Path',
   appSubtitle: 'Walk Journal',
-  appVersion:  '7.0',
+  appVersion:  '8.0',
 
   // ── Route ─────────────────────────────────────────────────────────────────
   // routeTotalKm: set null for non-linear collections (e.g. Munro bagging).
@@ -900,6 +926,117 @@ function saveDriveConfig(){localStorage.setItem(STORAGE_KEYS.DRIVE,JSON.stringif
 function saveToken(token,expiresIn){
   oauthToken=token;
   localStorage.setItem(STORAGE_KEYS.TOKEN,JSON.stringify({token,expiry:Date.now()+expiresIn*1000}));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SECTION 3B — INDEXEDDB LAYER  (Phase A scaffolding)
+//
+//  Defines the v8 storage layer: database open routine, generic CRUD helpers,
+//  and a one-shot localStorage → IDB migration. None of this is exercised at
+//  startup yet — Phase B wires it into loadLocal()/saveLocal() and the photo
+//  and GPX pipelines, at which point IDB becomes the authoritative store.
+//  Until then, localStorage (Section 3) remains live and these helpers are dormant.
+//
+//  Database layout (per upgrade brief §4.5):
+//    walks    keyPath 'id',     index date     — JSON walk records (no binary)
+//    photos   keyPath 'id',     index walkId   — { id, walkId, name, blob, w, h, mimeType }
+//    gpx      keyPath 'walkId'                 — { walkId, name, rawText, blob, points }
+//    settings keyPath 'key'                    — sync config, lastSynced, etc.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** @const {string} IDB database name. Munro app overrides to 'munro_journal'. */
+const IDB_NAME    = 'swcp_journal';
+/** @const {number} IDB schema version. Bump on store/index changes. */
+const IDB_VERSION = 1;
+
+/** @type {IDBDatabase|null} Singleton DB handle; populated by dbOpen(). */
+let _db = null;
+
+/**
+ * Open the IDB database, creating object stores and indexes on first run.
+ * Idempotent — subsequent calls return the cached handle.
+ * @returns {Promise<IDBDatabase>}
+ */
+function dbOpen(){
+  if(_db) return Promise.resolve(_db);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains('walks')){
+        const ws = db.createObjectStore('walks', { keyPath: 'id' });
+        ws.createIndex('date', 'date', { unique: false });
+      }
+      if(!db.objectStoreNames.contains('photos')){
+        const ps = db.createObjectStore('photos', { keyPath: 'id' });
+        ps.createIndex('walkId', 'walkId', { unique: false });
+      }
+      if(!db.objectStoreNames.contains('gpx')){
+        db.createObjectStore('gpx', { keyPath: 'walkId' });
+      }
+      if(!db.objectStoreNames.contains('settings')){
+        db.createObjectStore('settings', { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+/**
+ * Run a single-store transaction and resolve with the request result.
+ * Used internally by the typed helpers below.
+ * @param {string} store
+ * @param {IDBTransactionMode} mode
+ * @param {(s:IDBObjectStore)=>IDBRequest} fn
+ * @returns {Promise<*>}
+ */
+function _idbRun(store, mode, fn){
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(store, mode);
+    const req = fn(tx.objectStore(store));
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  }));
+}
+
+/** Get a single record by key. Resolves to undefined if absent. */
+function idbGet(store, key){    return _idbRun(store, 'readonly',  s => s.get(key));    }
+/** Put (insert or replace) a record. */
+function idbPut(store, value){  return _idbRun(store, 'readwrite', s => s.put(value));  }
+/** Delete a record by key. */
+function idbDelete(store, key){ return _idbRun(store, 'readwrite', s => s.delete(key)); }
+/** Get all records in a store. */
+function idbGetAll(store){      return _idbRun(store, 'readonly',  s => s.getAll());    }
+/** Get all records matching an index value. */
+function idbGetAllByIndex(store, index, value){
+  return _idbRun(store, 'readonly', s => s.index(index).getAll(value));
+}
+
+/**
+ * One-shot migration of v7 localStorage walks into the IDB walks store.
+ * Safe to call repeatedly — returns early if IDB already holds walks.
+ * Photos cannot be recovered (their dataUrls were stripped in v7); GPX rawText
+ * may have been preserved on some records and is migrated as-is on the walk
+ * record itself (Phase B will move it into the gpx store on next save).
+ * Wired into the INIT IIFE in Phase B.
+ */
+async function migrateFromLocalStorage(){
+  const raw = localStorage.getItem(STORAGE_KEYS.WALKS);
+  if(!raw) return;
+  try{
+    const oldWalks = JSON.parse(raw);
+    if(!Array.isArray(oldWalks) || !oldWalks.length) return;
+    const existing = await idbGetAll('walks');
+    if(existing.length > 0) return;   // already migrated
+    for(const walk of oldWalks){
+      await idbPut('walks', walk);
+    }
+    localStorage.setItem('swcp_migrated', 'v8');
+    console.info(`Migrated ${oldWalks.length} walks from localStorage to IndexedDB`);
+  }catch(e){
+    console.warn('Migration from localStorage failed', e);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2341,45 +2478,55 @@ async function uploadDriveAssets(walkNum,walkTitle,btn){
  * @param {Object|null} gpxRecord - Drive references for GPX artefacts, or null.
  * @returns {Object} Complete walk record ready for persistence.
  */
-function createWalkRecord(form,gpxRecord){
-  const savedPhotos=currentPhotos.map(p=>({
-    id:p.id,name:p.name,
-    w:p.w||null,h:p.h||null,
-    driveFileId:p.driveFileId||null,
-    driveViewUrl:p.driveViewUrl||null,
-    status:p.status,
-  }));
-  return{
-    id:form.id||uid(),
-    date:form.date,
-    title:form.title,
-    start:form.start,
-    finish:form.finish,
-    startTime:form.startTime,
-    finishTime:form.finishTime,
-    distance:form.distance,
-    elevation:form.elevation,
-    walkTime:parseFloat(form.walkTime.toFixed(2)),
-    weather:form.weather,
-    ground:form.ground,
-    terrain:form.terrain,
-    temperature:form.temperature,
-    visibility:form.visibility,
-    tide:form.tide,
-    difficulty:form.difficulty,
-    facilities:form.facilities,
-    wildlife:form.wildlife,
-    people:form.people,
-    groupNotes:form.groupNotes,
-    reflections:form.reflections,
-    tips:form.tips,
-    photosLink:form.photosLink,
-    tags:form.tags,
-    photos:savedPhotos,
-    gpxMap:gpxRecord,
-    walkNumber:form.walkNumber,
-    createdAt:new Date().toISOString(),
+/**
+ * Build a walk record from an overrides object, filling absent fields with
+ * type-appropriate defaults. Per upgrade brief §11.6, this function is the
+ * single source of truth for the walk record shape — every field listed in
+ * `defaults` is guaranteed to be present in the returned object, even when the
+ * caller passes nothing. exportSchema() introspects a default-only call to
+ * derive the schema, so adding a field here automatically propagates to the
+ * schema export with no other code change.
+ *
+ * Field-shape transformations (e.g. parseFloat on walkTime, photo metadata
+ * stripping) are the caller's responsibility — see saveWalk().
+ *
+ * @param {Object} [overrides] - Partial walk record. Any field omitted falls
+ *                                back to its type-appropriate default.
+ * @returns {Object} Complete walk record.
+ */
+function createWalkRecord(overrides = {}){
+  const defaults = {
+    id:           uid(),
+    walkNumber:   null,
+    date:         '',
+    title:        '',
+    start:        '',
+    finish:       '',
+    startTime:    '',
+    finishTime:   '',
+    walkTime:     null,
+    distance:     null,
+    elevation:    null,
+    weather:      [],
+    ground:       [],
+    terrain:      [],
+    facilities:   [],
+    temperature:  null,
+    visibility:   '',
+    tide:         '',
+    difficulty:   0,
+    wildlife:     '',
+    people:       [],
+    groupNotes:   '',
+    reflections:  '',
+    tips:         '',
+    photosLink:   '',
+    tags:         [],
+    photos:       [],
+    gpxMap:       null,
+    createdAt:    new Date().toISOString(),
   };
+  return { ...defaults, ...overrides };
 }
 
 /**
@@ -2455,7 +2602,25 @@ async function saveWalk(e){
 
   const form=collectFormValues();
   const{subFolderId,gpxRecord}=await uploadDriveAssets(form.walkNumber,form.title,btn);
-  const walk=createWalkRecord(form,gpxRecord);
+
+  // Map in-memory currentPhotos to serialisable metadata. The transient dataUrl
+  // is stripped here; saveLocal() also strips defensively. Phase B replaces this
+  // with photo Blobs persisted to IDB.
+  const savedPhotos=currentPhotos.map(p=>({
+    id:p.id,name:p.name,
+    w:p.w||null,h:p.h||null,
+    driveFileId:p.driveFileId||null,
+    driveViewUrl:p.driveViewUrl||null,
+    status:p.status,
+  }));
+
+  const walk=createWalkRecord({
+    ...form,
+    id:       form.id || uid(),
+    walkTime: form.walkTime != null ? parseFloat(form.walkTime.toFixed(2)) : null,
+    photos:   savedPhotos,
+    gpxMap:   gpxRecord,
+  });
   await persistWalk(walk,subFolderId,btn);
 
   resetForm();btn.disabled=false;btn.textContent='Save Walk Entry';showView('history');
@@ -3104,6 +3269,66 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).substr(
  * @returns {string}
  */
 function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SECTION 13B — SCHEMA EXPORT
+//
+//  Walk record schema introspection and export. The schema is derived dynamically
+//  from createWalkRecord() — change a field there and the next exported schema
+//  reflects it automatically. The companion reporting system consumes
+//  swcp-walks-schema.json to validate field-level drift; see brief §11 for the
+//  rationale, schema-file format, and validator design on the reporting side.
+//  In Phase A, exportSchema() and downloadSchema() are defined but not yet wired
+//  to a UI button (the Sync & Backup panel arrives in Phase C); the schema will
+//  also be auto-bundled into ZIP backups by exportZip() in Phase B.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Required-field whitelist; fields a walk record must have to be valid. */
+function isRequiredField(key){
+  return ['id','date','title','start','finish'].includes(key);
+}
+
+/**
+ * Derive the walk record schema by introspecting a default createWalkRecord() output.
+ * Format is a lightweight bespoke shape (not JSON Schema Draft-7) sufficient for
+ * field-level drift detection — see brief §11.2.
+ * @returns {{schemaVersion:string, generatedAt:string, generatedBy:string, fields:Object}}
+ */
+function exportSchema(){
+  const sample = createWalkRecord();
+  const fields = {};
+  for(const [key, value] of Object.entries(sample)){
+    let type;
+    if(value === null)            type = 'null';
+    else if(Array.isArray(value)){
+      type = (value.length && typeof value[0] === 'object') ? 'object[]' : 'string[]';
+    }
+    else                          type = typeof value;
+    fields[key] = { type, required: isRequiredField(key) };
+  }
+  return {
+    schemaVersion: '1.0',
+    generatedAt:   new Date().toISOString(),
+    generatedBy:   `${APP_CONFIG.appId}-v${APP_CONFIG.appVersion}`,
+    fields,
+  };
+}
+
+/**
+ * Trigger a browser download of swcp-walks-schema.json.
+ * Wired to the Sync & Backup panel button in Phase C.
+ */
+function downloadSchema(){
+  const schema = exportSchema();
+  const blob   = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href = url;
+  a.download = 'swcp-walks-schema.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Schema exported', 'success');
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SECTION 14 — INIT
